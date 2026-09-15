@@ -73,6 +73,20 @@ public struct KeyBinding: Codable, Equatable, Sendable {
         default:     return false
         }
     }
+
+    /// `CGEventFlags` bit that is set while this modifier key is held (0 for regular
+    /// keys and for Fn, which CGEventTap cannot observe as a flag). Single source of
+    /// truth for the key-code → flag mapping used by the toggle-key monitor.
+    public var modifierFlagMask: UInt64 {
+        switch keyCode {
+        case 54, 55: return CGEventFlags.maskCommand.rawValue     // Right/Left Command
+        case 61, 58: return CGEventFlags.maskAlternate.rawValue   // Right/Left Option
+        case 62, 59: return CGEventFlags.maskControl.rawValue     // Right/Left Control
+        case 56, 60: return CGEventFlags.maskShift.rawValue       // Left/Right Shift
+        case 57:     return CGEventFlags.maskAlphaShift.rawValue  // Caps Lock
+        default:     return 0
+        }
+    }
     
     /// Default toggle key: Right Command
     public static let defaultToggle = KeyBinding(keyCode: 54, modifiers: 0, displayName: "우측 Command")
@@ -241,7 +255,8 @@ public protocol ConfigurationProviding: AnyObject, Sendable {
     /// Whether Control+Space is configured as the toggle key
     var controlSpaceAsToggle: Bool { get }
 
-    /// Whether macOS owns Caps Lock input-source switching.
+    /// Whether macOS "Caps Lock으로 입력 소스 전환" is on. Informational (Settings
+    /// status card); it does NOT gate PriType's own toggle key.
     var capsLockInputSourceSwitchEnabled: Bool { get }
     
     /// Whether the system double-space period feature is enabled.
@@ -490,8 +505,11 @@ public final class ConfigurationManager: ConfigurationProviding, @unchecked Send
 
     /// Mirrors macOS "Use the Caps Lock key to switch to and from ABC".
     ///
-    /// When this is enabled, PriType should not also run its own language
-    /// toggle key. The system input-source switch becomes the single owner.
+    /// Read by the Settings status card only. It does not gate the custom toggle
+    /// key: with two registered PriType modes, Caps Lock (macOS → `setValue`
+    /// ingress) and the custom key (`performPriTypeModeTransition`) both land in
+    /// `HangulComposer.inputMode`, so there is no conflict to arbitrate. Reads
+    /// `CFPreferences`, so keep it off the keystroke hot path.
     public var capsLockInputSourceSwitchEnabled: Bool {
         if let value = CFPreferencesCopyValue(
             "TISRomanSwitchState" as CFString,

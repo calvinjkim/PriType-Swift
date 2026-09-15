@@ -23,7 +23,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         }
         
         // Setup toggle key monitoring
-        setupIOKit()
+        setupToggleKeyMonitoring()
         
         // Pre-load Hanja dictionary in background for instant lookup
         DispatchQueue.global(qos: .utility).async {
@@ -56,61 +56,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         return true
     }
     
-    private func setupIOKit() {
-        // Check/request Accessibility permission
+    /// Start the toggle/hanja key monitor, asking for Accessibility first if needed.
+    /// Monitor selection, callback wiring and the CGEventTap → IOKit fallback all
+    /// live in `ToggleKeyMonitor` (shared with the Settings accessibility flow).
+    private func setupToggleKeyMonitoring() {
         if !IOKitManager.hasAccessibilityPermission() {
             DebugLogger.log("Requesting Accessibility permission...")
             IOKitManager.requestAccessibilityPermission()
-            
+
             // Poll until user grants permission from the system popup
             Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { timer in
                 guard AXIsProcessTrusted() else { return }
                 timer.invalidate()
                 DebugLogger.log("Accessibility granted via system popup — starting key monitoring")
-                self.setupIOKit()
+                ToggleKeyMonitor.start()
             }
             return
         }
-        
-        // Set callback for CGEventTap toggle handler (handles all toggle keys)
-        RightCommandSuppressor.shared.onToggle = {
-            InputModeCoordinator.shared.requestToggle(source: .customKey)
-        }
-        
-        // Set callback for Right Option key → Hanja lookup
-        RightCommandSuppressor.shared.onHanjaLookup = {
-            PriTypeInputController.sharedComposer.triggerHanjaLookup()
-        }
-        
-        // Track if CGEventTap started successfully
-        let eventTapStarted = RightCommandSuppressor.shared.start()
-        
-        // IOKit backup: Only start and activate actual toggle if CGEventTap failed
-        if eventTapStarted {
-            DebugLogger.log("Primary: CGEventTap started successfully")
-            // Register fallback: if CGEventTap dies repeatedly, switch to IOKit
-            RightCommandSuppressor.shared.onTapFailed = {
-                DebugLogger.log("CGEventTap failed repeatedly — activating IOKit fallback")
-                IOKitManager.shared.onRightCommandToggle = {
-                    InputModeCoordinator.shared.requestToggle(source: .iokitFallback)
-                }
-                IOKitManager.shared.onRightOptionHanja = {
-                    PriTypeInputController.sharedComposer.triggerHanjaLookup()
-                }
-                IOKitManager.shared.start()
-            }
-        } else {
-            DebugLogger.log("Primary: CGEventTap FAILED - IOKit taking over as primary")
-            // IOKit takes over as primary toggle handler
-            IOKitManager.shared.onRightCommandToggle = {
-                InputModeCoordinator.shared.requestToggle(source: .iokitFallback)
-            }
-            IOKitManager.shared.onRightOptionHanja = {
-                PriTypeInputController.sharedComposer.triggerHanjaLookup()
-            }
-            IOKitManager.shared.start()
-        }
-        
+
+        ToggleKeyMonitor.start()
         DebugLogger.log("Toggle key monitoring initialized")
     }
 }
