@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import CoreGraphics
 @testable import PriTypeCore
 
 // MARK: - ConfigurationManager Tests
@@ -99,6 +100,24 @@ struct ConfigurationManagerTests {
         let f13 = KeyBinding(keyCode: 105, modifiers: 0, displayName: "F13")
         #expect(!f13.isModifierKey)
     }
+    @Test("C12: KeyBinding.modifierFlagMask maps modifier key codes to CGEventFlags bits")
+    func keyBindingModifierFlagMask() {
+        func mask(_ keyCode: Int64) -> UInt64 {
+            KeyBinding(keyCode: keyCode, modifiers: 0, displayName: "").modifierFlagMask
+        }
+        #expect(mask(54) == CGEventFlags.maskCommand.rawValue)     // Right Command
+        #expect(mask(55) == CGEventFlags.maskCommand.rawValue)     // Left Command
+        #expect(mask(61) == CGEventFlags.maskAlternate.rawValue)   // Right Option
+        #expect(mask(58) == CGEventFlags.maskAlternate.rawValue)   // Left Option
+        #expect(mask(62) == CGEventFlags.maskControl.rawValue)     // Right Control
+        #expect(mask(59) == CGEventFlags.maskControl.rawValue)     // Left Control
+        #expect(mask(56) == CGEventFlags.maskShift.rawValue)       // Left Shift
+        #expect(mask(60) == CGEventFlags.maskShift.rawValue)       // Right Shift
+        #expect(mask(57) == CGEventFlags.maskAlphaShift.rawValue)  // Caps Lock
+        #expect(mask(63) == 0)                                     // Fn: no observable flag
+        #expect(mask(5) == 0)                                      // Regular key (G)
+    }
+
     @Test("KeyBinding Equatable detects conflicts")
     func keyBindingConflictDetection() {
         let toggle = KeyBinding(keyCode: 54, modifiers: 0, displayName: "우측 Command")

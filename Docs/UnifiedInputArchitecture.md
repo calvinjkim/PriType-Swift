@@ -1,12 +1,21 @@
 # PriType 통합 입력 아키텍처 (Unified Input Architecture)
 
-작성일: 2026-06-01
+작성일: 2026-06-01 · 최종 수정: 2026-09-15
 상태: **canonical** — 이 문서가 한/영 입력 구조의 정식 명세다.
+
+> **2026-09-15 개정 메모.** 두 가지가 코드와 어긋나 있었다.
+> 1. §2.1 "단일 모드 등록 / `selectInputMode:` 미사용"은 **superseded**. 2026-06-05(commit fbca796)부터
+>    `Info.plist`는 한글(`smKorean`) + 영어(`smRoman`) **두 입력 모드**를 등록하고 `TICapsLockLanguageSwitchCapable`을
+>    선언하며, custom 전환은 macOS 선택 모드를 맞추기 위해 `selectInputMode:`를 best-effort로 호출한다.
+>    회귀 가드는 `Tests/PriTypeCoreTests/RegistrationContractTests.swift`. §2.1 본문은 결정 이력으로만 남긴다.
+> 2. 불변식 7 "Caps Lock on이면 custom toggle 비활성화"는 **폐기**(§3 참조). 두 경로가 같은 `composer.inputMode`로
+>    수렴하는 2-모드 구조에서는 중재할 충돌이 없고, 이 가드가 한국어 macOS 기본값(Caps Lock 전환 켜짐)에서
+>    우측 Command 전환키를 죽이는 원인이었다.
 
 이 문서는 `v2.6.5`(내부 모드 통합)와 `v2.7.2`(macOS 입력 소스 통합)의 장점을 결합한
 현재 아키텍처를 기술한다. 과거의 [InputArchitectureHybridRollbackPlan.md](InputArchitectureHybridRollbackPlan.md)는
-"영어 가짜 모드 2개 등록" 안을 제안했으나, 실제 구현은 더 단순한 **단일 소스 하이브리드**로
-수렴했다. 그 차이와 근거는 아래 §2.1에 정리한다.
+"영어 가짜 모드 2개 등록" 안을 제안했으나, 2026-06-01 시점 구현은 더 단순한 **단일 소스 하이브리드**로
+수렴했다(이후 2-모드 등록으로 다시 전환됨 — 위 개정 메모). 그 차이와 근거는 아래 §2.1에 정리한다.
 
 ---
 
@@ -31,14 +40,16 @@
 **결합안:** PriType 단일 입력 소스가 IMK 세션을 **영구 소유**하고, 한/영은 `HangulComposer.inputMode`
 하나로 내부 전환한다(2.6.5의 무지연·일관성). 영어는 조합하지 않고 raw key를 pass-through하며,
 `overrideKeyboardWithKeyboardNamed`로 로마자 레이아웃을 입혀 ABC를 *체감*으로 재현한다(2.7대의 통합 일부).
-Caps Lock 기반 전환은 그대로 macOS가 소유하고, 이때 PriType custom toggle은 비활성화한다.
+Caps Lock 기반 전환은 macOS가 소유하며(두 PriType 모드 사이를 오감), PriType custom toggle과 함께 쓸 수 있다 —
+둘 다 `composer.inputMode`로 수렴한다.
 
 ---
 
 ## 2. 권장 구조
 
 ```
-CGEventTap / IOKit  ──(키 감지만)──►  InputModeCoordinator   (정책: Caps Lock·controller 유무)
+CGEventTap / IOKit  ──(키 감지만)──►  InputModeCoordinator   (정책: active controller 유무)
+ (판정: ToggleKeyEventClassifier, 수명·폴백: ToggleKeyMonitor)
                                             │ requestToggle
                                             ▼
                               PriTypeInputController          (IMK 세션 imperative edge)
@@ -75,7 +86,9 @@ CGEventTap / IOKit  ──(키 감지만)──►  InputModeCoordinator   (정�
 | 상태 | 소유자 | 비고 |
 | --- | --- | --- |
 | 한/영 진리 | `HangulComposer.inputMode` | 단일 source of truth |
-| 전환 정책(Caps Lock·fallback) | `InputModeCoordinator` | 한 곳에서만 판단 |
+| 전환 정책(active controller 유무) | `InputModeCoordinator` | 한 곳에서만 판단 |
+| 전환키 이벤트 판정 | `ToggleKeyEventClassifier` | 순수 로직, 단위 테스트 |
+| 키 모니터 수명·폴백 | `ToggleKeyMonitor` | 항상 모니터 1개 |
 | IMK 세션 edge(commit·override·layout) | `PriTypeInputController` | imperative 경계 |
 | 실제 TIS source 선택 | **macOS만** | Caps Lock 경로 한정 |
 | 사용자 표시(가/A) | `StatusBarManager` | |
@@ -93,8 +106,12 @@ CGEventTap / IOKit  ──(키 감지만)──►  InputModeCoordinator   (정�
 3. 모드 전환 전 active composition은 정확히 1회 commit한다.
 4. 전환 직후 keyDown을 막거나 replay하지 않는다. 전환이 즉시 완료되므로 불필요하다.
 5. 영어 모드에서 PriType는 printable key를 consume하지 않는다(`return false`).
-6. 일반 typing hot path에 TIS/AX 조회·UserDefaults JSON decode·로그 문자열 생성이 없다.
-7. Caps Lock on이면 custom toggle을 비활성화한다. 둘이 같은 키 이벤트에서 동시 동작하지 않는다.
+6. 일반 typing hot path에 TIS/AX 조회·UserDefaults JSON decode·로그 문자열 생성·`CFPreferences` IPC가 없다.
+7. macOS Caps Lock 전환 설정은 custom toggle을 막지 않는다. Caps Lock 키(57) 자체는 PriType 바인딩으로 거부되므로
+   두 경로가 같은 키 이벤트를 다투지 않고, 둘 다 `composer.inputMode`로 수렴한다. (2026-09-15 개정 — 이전 문구
+   "Caps Lock on이면 custom toggle 비활성화"는 폐기.)
+8. 전환키 모니터는 항상 정확히 하나만 살아 있다. CGEventTap → IOKit 핸드오버 시 탭을 먼저 중지한다.
+   (둘이 동시에 살면 한 번의 누름에 토글이 2회 일어나 원래 모드로 돌아온다.)
 
 ---
 
@@ -138,18 +155,18 @@ Caps Lock 정책·active controller 가드·전환 전 1회 commit을 한 곳(co
 
 ```
 Tap/IOKit  ──requestToggle(source)──►  InputModeCoordinator
-   InputModeCoordinator: Caps Lock 소유면 거부, active controller 없으면 거부
-   InputModeCoordinator ──performModeTransition──►  PriTypeInputController
-      Controller: commit active composition (1회)
+   InputModeCoordinator: active controller 없으면 거부
+   InputModeCoordinator ──performPriTypeModeTransition──►  PriTypeInputController
+      Controller: session.finalize(.modeTransition)   ← commit active composition (1회)
       Controller: overrideKeyboardWithKeyboardNamed(ABC/US)
-      Controller: composer.setInputMode(next)   ← 단일 진리 갱신
+      Controller: composer.setInputMode(next)         ← 단일 진리 갱신
+      Controller: selectInputMode:(next mode id)      ← macOS 선택 모드 동기화 (best-effort)
 ```
 
 실패 처리:
 
 - active controller가 없으면 composer mode만 단독으로 바꾸지 않는다(다음 activate에서 stale state로 첫 글자 엉킴 방지).
-- `lastClient`/`lastKnownInputClient`가 모두 없으면 no-op.
-- Caps Lock 소유 상태면 custom toggle은 진입 자체가 거부된다.
+- 세션(client)이 없으면 no-op.
 
 ---
 
@@ -174,7 +191,8 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build -c release 
 - Return/Enter 1회 — GoodNotes 중복 줄바꿈 없음
 - Hanja 후보창 호출 및 좌표 — Chromium fallback 포함
 - 영어 모드 더블스페이스 — host(macOS)가 처리하는지 확인 (정제 ② 검증 의존)
-- Caps Lock 전환 on — custom toggle 비활성, macOS만 ABC↔PriType 전환
+- Caps Lock 전환 on — Caps Lock(macOS)과 custom toggle(PriType) 모두 동작, 메뉴바 `한`/`A`와 macOS 선택 모드가 일치
+- 우측 Command를 누른 채 문자 입력 — 단축키가 아닌 일반 문자로 입력됨 (modifier stripping)
 
 ---
 

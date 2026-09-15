@@ -17,9 +17,9 @@ import ApplicationServices
 /// - **Primary handler**: `RightCommandSuppressor` (CGEventTap)
 /// - **Backup handler**: `IOKitManager` (IOHIDManager)
 ///
-/// The main entry point (`main.swift`) first attempts to start `RightCommandSuppressor`.
-/// If that fails, `IOKitManager` takes over as the primary toggle handler.
-/// When CGEventTap succeeds, `IOKitManager` runs in passive monitoring mode only.
+/// `ToggleKeyMonitor` owns the choice: it starts `RightCommandSuppressor` first and
+/// starts this manager only when the tap cannot be created or has been disabled by
+/// the system repeatedly — after stopping the tap, so exactly one handler is live.
 ///
 /// ## Primary Use Cases
 /// - Accessibility permission check (`hasAccessibilityPermission()`)
@@ -30,7 +30,10 @@ public final class IOKitManager: @unchecked Sendable {
     public static let shared = IOKitManager()
     
     private var manager: IOHIDManager?
-    
+
+    /// Whether the HID manager is currently open and delivering events
+    public var isRunning: Bool { manager != nil }
+
     /// Callback when toggle key is pressed
     public var onRightCommandToggle: (@Sendable () -> Void)?
     
@@ -162,18 +165,13 @@ public final class IOKitManager: @unchecked Sendable {
         let config = ConfigurationManager.shared
         let toggleBinding = config.toggleKeyBinding
         let hanjaBinding = config.hanjaKeyBinding
-        let priTypeToggleEnabled = !config.capsLockInputSourceSwitchEnabled
-        if !priTypeToggleEnabled {
-            toggleKeyIsDown = false
-            anyOtherKeyPressed = false
-        }
-        
+
         // Get HID usages for configured keys
         let toggleUsage = Self.hidUsage(for: toggleBinding.keyCode)
         let hanjaUsage = Self.hidUsage(for: hanjaBinding.keyCode)
 
         // Check for toggle key (only for modifier-only bindings)
-        if priTypeToggleEnabled && toggleBinding.isModifierOnly, let expectedUsage = toggleUsage, usage == expectedUsage {
+        if toggleBinding.isModifierOnly, let expectedUsage = toggleUsage, usage == expectedUsage {
             if pressed {
                 // Toggle key pressed
                 toggleKeyIsDown = true
@@ -219,7 +217,7 @@ public final class IOKitManager: @unchecked Sendable {
                 hanjaKeyIsDown = false
                 DebugLogger.log("IOKitManager: Hanja key UP (\(hanjaBinding.displayName))")
             }
-        } else if priTypeToggleEnabled && toggleKeyIsDown && pressed && usage > 0 && usage < 0xE0 {
+        } else if toggleKeyIsDown && pressed && usage > 0 && usage < 0xE0 {
             // Non-modifier key pressed while toggle key is down
             anyOtherKeyPressed = true
             DebugLogger.log("IOKitManager: Key pressed while toggle key is down (combo)")

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 수정 (우측 Command 등 사용자 지정 한/영 전환키가 동작하지 않던 문제)
+- macOS "Caps Lock으로 ABC 입력 소스 전환"이 켜져 있으면 PriType 전환키를 세 곳(`RightCommandSuppressor`, `IOKitManager`, `InputModeCoordinator`)에서 조용히 무시하던 가드를 제거했습니다. 한국어 macOS의 기본값이 켜짐이라 대부분의 사용자에게 우측 Command가 죽는 원인이었습니다. 이 가드는 단일 모드 + 실제 ABC 소스 시절(2.7.x)의 충돌 방지책으로, 현재의 한글·영어 2-모드 등록 구조에서는 Caps Lock(macOS → `setValue` ingress)과 전환키(`performPriTypeModeTransition`)가 모두 같은 `HangulComposer.inputMode`로 수렴하므로 존재 이유가 없습니다. 부수 효과로 CGEventTap 콜백(모든 키 이벤트)에서 매번 실행되던 `CFPreferences` IPC가 사라졌습니다.
+- CGEventTap이 60초 내 3회 비활성화되어 IOKit 백업으로 넘어갈 때 CGEventTap을 끄지 않아 두 모니터가 동시에 살던 결함을 고쳤습니다. 이 상태에서는 우측 Command 1회에 토글이 2번(탭은 누름, IOKit은 뗌) 일어나 원래 모드로 돌아와 "전환키가 안 먹는" 증상이 되고, 입력기 프로세스가 재시작될 때까지 지속됐습니다. 이제 핸드오버 시 탭을 먼저 중지하며(`ToggleKeyMonitor`), IOKit 시작에 실패하면 탭을 다시 켭니다.
+- 설정 창의 한/영 전환키 행이 Caps Lock 상태에 따라 비활성화되지 않습니다. Caps Lock 상태 카드는 남기고 설명을 "함께 사용 가능"으로 바꿨습니다.
+
+### 구조 (전환키 경로)
+- CGEventTap 콜백의 판정 로직(토글·한자·modifier 제거·통과)을 순수 타입 `ToggleKeyEventClassifier`로 분리해 단위 테스트를 추가했습니다(13개). 키코드 → `CGEventFlags` 매핑은 `KeyBinding.modifierFlagMask` 한 곳으로 모았습니다.
+- `main.swift`와 설정 창 접근성 흐름에 중복돼 있던 전환/한자/폴백 콜백 배선을 `ToggleKeyMonitor.start()` 한 곳으로 일원화했습니다. 설정 창 경로에는 `onTapFailed` 배선이 빠져 있었습니다.
+- 사용되지 않던 상태(`controlIsDown`)와 문자열 3개(`keyBinding.capsLockSummary`, `disabledByCapsLock`, `managedByMacOS`)를 제거했습니다.
+
+### 문서
+- `Docs/UnifiedInputArchitecture.md`(canonical)와 `ARCHITECTURE.md`가 "단일 입력 모드 등록·`selectInputMode:` 미사용·Caps Lock on이면 custom toggle 비활성"이라고 서술해 코드(2-모드 등록, `selectInputMode:` 동기화)와 어긋나 있던 부분을 정정하고, 불변식 7을 개정했습니다. README의 한/영 전환 설정 안내도 함께 갱신했습니다.
+- 작업 상태 파일 `CONTRACT.md`(계약·검증 체크리스트), `PROGRESS.md`(진행 상황·후속 과제)를 추가했습니다.
+
 ### 조사 (한글 조합 밑줄 — macOS 26에서는 marked text로 제거 불가)
 - 조합 밑줄을 모든 앱에서 없애기 위해 marked text 속성을 엔진별로 조정했으나(`PreeditUnderline`: Blink는 `underlineStyle 1 + alpha 1/255`, 그 외는 `underlineStyle 0 + NSColor.clear`), **macOS 26에서는 효과가 없음을 실측으로 확인했습니다**. NSTextInputClient 프로브로 실제 IMK 전송 경로를 측정한 결과, IME가 보내는 모든 속성 조합 — underline 0+clear, alpha 1/255, `NSMarkedClauseSegment` 1~9(kNoHilite 포함 전체 TSM hilite 카테고리), 심지어 속성 없는 문자열까지 13종 전부 — 이 앱에는 동일한 `NSUnderline=2 + 액센트 블루`로 재생성되어 도착합니다. 수신 측 프레임워크가 IME 스타일을 폐기하고 시스템 표준 스타일을 합성하므로, **macOS 26에서는 어떤 IME도 marked text 밑줄을 숨길 수 없습니다**(애플 한글 IME도 동일한 밑줄). 엔진별 속성 튜닝은 속성이 통과되는 구버전 macOS에서만 유효하며 코드에 유지합니다(오분류·부작용 없음). 밑줄 없는 입력은 marked text를 쓰지 않는 직접 삽입 모드(`com.pritype.experimentalDirectInsertion`)로 제공됩니다. 측정 과정은 `PreeditUnderline` 주석에 기록했습니다.
 

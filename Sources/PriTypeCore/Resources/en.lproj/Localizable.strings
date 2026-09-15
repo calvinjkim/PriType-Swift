@@ -26,14 +26,11 @@
 "keyBinding.conflict" = "Cannot use the same key";
 "keyBinding.conflictRestored" = "Cannot use the same key. Restored the previous setting.";
 "keyBinding.reset" = "Reset to Default";
-"keyBinding.capsLockSummary" = "When Caps Lock input-source switching is on, PriType's toggle key is disabled.";
 "keyBinding.capsLockStatusTitle" = "Caps Lock input-source switch";
 "keyBinding.capsLockStatusOn" = "On";
 "keyBinding.capsLockStatusOff" = "Off";
-"keyBinding.capsLockOnDescription" = "Caps Lock switches Korean/English through macOS Input Source settings. PriType's toggle key is disabled to avoid duplicate switching.";
-"keyBinding.capsLockOffDescription" = "PriType's toggle key switches Korean/English. Enable Caps Lock in macOS Input Source settings if you prefer that key.";
-"keyBinding.disabledByCapsLock" = "Disabled while Caps Lock input-source switching is on";
-"keyBinding.managedByMacOS" = "macOS Caps Lock";
+"keyBinding.capsLockOnDescription" = "Caps Lock also switches Korean/English through macOS Input Source settings. It works alongside PriType's toggle key; both change the same Korean/English state.";
+"keyBinding.capsLockOffDescription" = "PriType's toggle key switches Korean/English. Turn on Caps Lock in macOS Input Source settings if you also want that key.";
 "keyBinding.capsLockBlockedTitle" = "Set Caps Lock in macOS";
 "keyBinding.capsLockBlockedMessage" = "Caps Lock is not a PriType custom key. Enable Caps Lock switching in macOS Input Source settings.";
 "keyBinding.capsLockOpenSettings" = "Open Input Source Settings";
