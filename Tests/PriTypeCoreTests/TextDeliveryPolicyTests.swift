@@ -282,3 +282,35 @@ struct SafariDirectInsertionTests {
         #expect(ClientCompatibilityPolicy.isWebContentHost(bundleId: "com.apple.Safari"))
     }
 }
+
+// MARK: - Raw jamo is a marked-text-only workaround
+
+/// Conjoining U+1100 jamo exists so a web editor keeps the MARKED composition
+/// open past the first choseong. A host composing by direct insertion has no
+/// composition: the jamo is written as real text and stays there. Typing
+/// 사파이어메모 inside existing text left a bare `ᄉ` (U+1109) in the document.
+@Suite("RawJamoNeedsMarkedText")
+struct RawJamoNeedsMarkedTextTests {
+    @Test("Direct-insertion hosts must not emit conjoining jamo")
+    func directInsertionHostsUseDisplayJamo() {
+        for id in ["com.apple.Safari", "com.apple.SafariTechnologyPreview"] {
+            #expect(!ClientCompatibilityPolicy.prefersRawJamoPreedit(bundleId: id),
+                    "\(id) composes by direct insertion; conjoining jamo would be stranded as real text")
+        }
+    }
+
+    @Test("Marked-text web hosts keep raw jamo")
+    func markedTextWebHostsKeepRawJamo() {
+        for id in ["com.google.Chrome", "com.anthropic.claudefordesktop", "com.atlassian.confluence"] {
+            #expect(ClientCompatibilityPolicy.prefersRawJamoPreedit(bundleId: id),
+                    "\(id) still composes via marked text and needs the jamo")
+        }
+    }
+
+    @Test("Native hosts keep compatibility jamo")
+    func nativeHostsUnchanged() {
+        for id in ["com.kakao.KakaoTalkMac", "com.apple.TextEdit"] {
+            #expect(!ClientCompatibilityPolicy.prefersRawJamoPreedit(bundleId: id))
+        }
+    }
+}

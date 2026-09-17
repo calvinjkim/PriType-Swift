@@ -157,7 +157,9 @@ struct ClientContextTests {
             "com.example.MyElectronApp"
         ] {
             #expect(ClientCompatibilityPolicy.isWebContentHost(bundleId: id), "\(id) should be a web content host")
-            #expect(ClientCompatibilityPolicy.prefersRawJamoPreedit(bundleId: id), "\(id) should keep raw jamo")
+            // Raw jamo depends on the delivery mode, not on being a web host:
+            // direct-insertion hosts would strand it as real text.
+            // See RawJamoNeedsMarkedText.
             #expect(ClientCompatibilityPolicy.prefersCollapsedCompositionReplacement(bundleId: id), "\(id) should start composition without replacing host selection")
         }
     }

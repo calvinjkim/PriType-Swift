@@ -204,8 +204,14 @@ public enum ClientCompatibilityPolicy {
     /// the same syllable in the next item (`- ㄱ` / `- 감사합니다.`). Keep the
     /// engine's choseong jamo (U+1100) so the host leaves composition open.
     /// Native AppKit hosts keep compatibility jamo for display.
+    ///
+    /// Marked text only. A host that composes by direct insertion has no open
+    /// composition to protect: the conjoining jamo is written as REAL text and is
+    /// left behind when the syllable is rewritten (typing 사파이어메모 inside
+    /// existing text stranded a bare `ᄉ` U+1109 in Safari).
     public static func prefersRawJamoPreedit(bundleId: String) -> Bool {
         isWebContentHost(bundleId: bundleId)
+            && !prefersDirectInsertionForComposition(bundleId: bundleId)
     }
 
     /// Web editors' empty list items often have a non-collapsed / placeholder
