@@ -206,6 +206,11 @@ enum MarkedTextReplacement {
         // Empty-list placeholders are length 0 or 1. A real selection (a word)
         // must still be replaced via NSNotFound, or the first jamo inserts in
         // front of the selected text in Chrome/Safari/Slack.
+        // A one-character range is ambiguous: an empty Confluence/ProseMirror list
+        // item reports exactly that for its placeholder, and so does a shift-arrow
+        // over a single letter. The placeholder case is the one confirmed on-device,
+        // so it wins; the cost is that typing over a one-character selection in a
+        // web editor inserts in front of it instead of replacing it.
         if selectedRange.length > 1 {
             return notFound
         }

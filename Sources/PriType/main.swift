@@ -80,45 +80,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             return
         }
         
-        // Set callback for CGEventTap toggle handler (handles all toggle keys)
-        RightCommandSuppressor.shared.onToggle = {
-            InputModeCoordinator.shared.requestToggle(source: .customKey)
-        }
-        
-        // Set callback for Right Option key → Hanja lookup
-        RightCommandSuppressor.shared.onHanjaLookup = {
-            PriTypeInputController.sharedComposer.triggerHanjaLookup()
-        }
-        
-        // Track if CGEventTap started successfully
-        let eventTapStarted = RightCommandSuppressor.shared.start()
-        
-        // IOKit backup: Only start and activate actual toggle if CGEventTap failed
-        if eventTapStarted {
-            DebugLogger.log("Primary: CGEventTap started successfully")
-            // Register fallback: if CGEventTap dies repeatedly, switch to IOKit
-            RightCommandSuppressor.shared.onTapFailed = {
-                DebugLogger.log("CGEventTap failed repeatedly — activating IOKit fallback")
-                IOKitManager.shared.onRightCommandToggle = {
-                    InputModeCoordinator.shared.requestToggle(source: .iokitFallback)
-                }
-                IOKitManager.shared.onRightOptionHanja = {
-                    PriTypeInputController.sharedComposer.triggerHanjaLookup()
-                }
-                IOKitManager.shared.start()
-            }
-        } else {
-            DebugLogger.log("Primary: CGEventTap FAILED - IOKit taking over as primary")
-            // IOKit takes over as primary toggle handler
-            IOKitManager.shared.onRightCommandToggle = {
-                InputModeCoordinator.shared.requestToggle(source: .iokitFallback)
-            }
-            IOKitManager.shared.onRightOptionHanja = {
-                PriTypeInputController.sharedComposer.triggerHanjaLookup()
-            }
-            IOKitManager.shared.start()
-        }
-        
+        KeyMonitoring.arm()
+
         DebugLogger.log("Toggle key monitoring initialized")
     }
 }

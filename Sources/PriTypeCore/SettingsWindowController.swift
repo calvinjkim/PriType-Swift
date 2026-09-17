@@ -664,17 +664,9 @@ struct SettingsView: View {
             DispatchQueue.main.async {
                 self.isAccessibilityGranted = true
 
-                // Auto-start key monitoring that was skipped at launch
-                if !RightCommandSuppressor.shared.isRunning {
-                    RightCommandSuppressor.shared.onToggle = {
-                        InputModeCoordinator.shared.requestToggle(source: .customKey)
-                    }
-                    RightCommandSuppressor.shared.onHanjaLookup = {
-                        PriTypeInputController.sharedComposer.triggerHanjaLookup()
-                    }
-                    let started = RightCommandSuppressor.shared.start()
-                    DebugLogger.log("Accessibility granted: CGEventTap start = \(started)")
-                }
+                // Same wiring as launch, including the IOKit fallback this
+                // path used to leave unregistered.
+                KeyMonitoring.armIfNeeded()
             }
         }
     }

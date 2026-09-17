@@ -217,6 +217,10 @@ public class PriTypeInputController: IMKInputController, @unchecked Sendable {
 
     // 입력기가 활성화될 때 호출 - 새 세션 시작
     override public func activateServer(_ sender: Any!) {
+        // Recover a permission granted after launch: the startup poll gives up
+        // after two minutes and nothing else re-armed the tap, so the toggle key
+        // stayed dead for the session while Settings reported it as granted.
+        KeyMonitoring.armIfNeeded()
         #if DEBUG
         assert(Thread.isMainThread, "IMK activateServer must run on main thread")
         #endif

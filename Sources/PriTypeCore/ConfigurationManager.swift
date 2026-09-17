@@ -430,6 +430,9 @@ public final class ConfigurationManager: ConfigurationProviding, @unchecked Send
     // JSON decoding on every access is wasteful; cache in memory and invalidate on write.
     // Lock protects in-memory cache from races between CGEventTap thread and settings UI.
     
+    private let capsLockSwitchLock = NSLock()
+    private var cachedCapsLockSwitch: (value: Bool, readAt: TimeInterval)?
+
     private var _cachedToggleBinding: KeyBinding?
     private var _cachedHanjaBinding: KeyBinding?
     private let keyBindingLock = NSLock()
@@ -523,6 +526,31 @@ public final class ConfigurationManager: ConfigurationProviding, @unchecked Send
     /// When this is enabled, PriType should not also run its own language
     /// toggle key. The system input-source switch becomes the single owner.
     public var capsLockInputSourceSwitchEnabled: Bool {
+        // Read on EVERY event-tap and HID callback, so a cfprefsd round trip here
+        // sits on the keystroke path and can push the tap past its deadline — three
+        // of those disable it permanently. Hold the answer briefly so a change in
+        // System Settings is still picked up within a second.
+        let now = ProcessInfo.processInfo.systemUptime
+        capsLockSwitchLock.lock()
+        if let cached = cachedCapsLockSwitch, now - cached.readAt < Self.capsLockSwitchTTL {
+            capsLockSwitchLock.unlock()
+            return cached.value
+        }
+        capsLockSwitchLock.unlock()
+
+        let value = Self.readCapsLockInputSourceSwitch()
+        capsLockSwitchLock.lock()
+        cachedCapsLockSwitch = (value: value, readAt: now)
+        capsLockSwitchLock.unlock()
+        return value
+    }
+
+    /// How long a cached answer stays usable. Short enough that toggling the system
+    /// setting takes effect without a restart, long enough to take the lookup off
+    /// the per-keystroke path.
+    static let capsLockSwitchTTL: TimeInterval = 1.0
+
+    private static func readCapsLockInputSourceSwitch() -> Bool {
         if let value = CFPreferencesCopyValue(
             "TISRomanSwitchState" as CFString,
             kCFPreferencesAnyApplication,
