@@ -117,10 +117,10 @@ EOF
 copy_to_system() {
     local src="$1"
     local dest="$2"
-    local helper
-    helper=$(mktemp "${TMPDIR:-/tmp}/pritype-install.XXXXXX")
-    cat > "$helper" <<'SH'
-set -e
+    # Kept in argv, never on disk: a helper file written here and then run as root
+    # can be rewritten by any process running as this user in between, which turns
+    # an install into arbitrary root execution.
+    local body='set -e
 src="$1"
 dest="$2"
 rm -rf "$dest.new" "$dest.old"
@@ -130,29 +130,25 @@ if [ -d "$dest" ]; then
 fi
 mv "$dest.new" "$dest"
 rm -rf "$dest.old"
-# Leftover names from older installs.
 rm -rf "/Library/Input Methods/PatchType.app" \
        "/Library/Input Methods/PriType.app" \
-       "/tmp/PriTypeV2.app.disabled"
-SH
+       "/tmp/PriTypeV2.app.disabled"'
 
     if sudo -n true 2>/dev/null; then
-        sudo /bin/bash "$helper" "$src" "$dest"
-        rm -f "$helper"
+        sudo /bin/bash -c "$body" swap "$src" "$dest"
         return 0
     fi
 
     echo "Administrator access is required to install into /Library/Input Methods."
     echo "A password dialog may appear."
-    osascript - "$helper" "$src" "$dest" <<'APPLESCRIPT'
+    osascript - "$body" "$src" "$dest" <<'APPLESCRIPT'
 on run argv
-    set helper to item 1 of argv
+    set body to item 1 of argv
     set src to item 2 of argv
     set dest to item 3 of argv
-    do shell script "/bin/bash " & quoted form of helper & " " & quoted form of src & " " & quoted form of dest with administrator privileges
+    do shell script "/bin/bash -c " & quoted form of body & " swap " & quoted form of src & " " & quoted form of dest with administrator privileges
 end run
 APPLESCRIPT
-    rm -f "$helper"
 }
 
 echo "Building $BUILD_CONFIG..."

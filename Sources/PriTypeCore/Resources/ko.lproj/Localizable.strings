@@ -33,6 +33,7 @@
 "keyBinding.capsLockOnDescription" = "macOS 입력 소스 설정을 따라 Caps Lock으로 한/영을 전환합니다. %@ 전환키는 중복 동작을 막기 위해 비활성화됩니다.";
 "keyBinding.capsLockOffDescription" = "%@ 전환키로 한/영을 전환합니다. Caps Lock을 쓰려면 macOS 입력 소스 설정에서 켜 주세요.";
 "keyBinding.disabledByCapsLock" = "Caps Lock 입력 소스 전환이 켜져 있어 비활성화됨";
+"keyBinding.bareKeyRejected" = "그 키는 단독으로 지정할 수 없습니다. 수정자 키와 함께 누르거나 우측 Command 같은 수정자 키를 사용하세요.";
 "keyBinding.managedByMacOS" = "macOS Caps Lock";
 "keyBinding.capsLockBlockedTitle" = "Caps Lock은 macOS에서 설정합니다";
 "keyBinding.capsLockBlockedMessage" = "%@ 전환키로는 사용할 수 없습니다. macOS 입력 소스 설정에서 Caps Lock 전환을 켜 주세요.";

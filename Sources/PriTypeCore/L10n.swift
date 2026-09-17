@@ -78,6 +78,7 @@ public enum L10n {
         public static var capsLockOnDescription: String { String(format: localized("keyBinding.capsLockOnDescription"), app.name) }
         public static var capsLockOffDescription: String { String(format: localized("keyBinding.capsLockOffDescription"), app.name) }
         public static var disabledByCapsLock: String { localized("keyBinding.disabledByCapsLock") }
+        public static var bareKeyRejected: String { localized("keyBinding.bareKeyRejected") }
         public static var managedByMacOS: String { localized("keyBinding.managedByMacOS") }
         public static var capsLockBlockedTitle: String { localized("keyBinding.capsLockBlockedTitle") }
         public static var capsLockBlockedMessage: String { String(format: localized("keyBinding.capsLockBlockedMessage"), app.name) }

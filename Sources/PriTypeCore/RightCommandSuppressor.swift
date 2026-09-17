@@ -217,8 +217,11 @@ public final class RightCommandSuppressor: @unchecked Sendable {
             
             // Dynamic toggle key — modifier key, single-key binding
             if priTypeToggleEnabled && toggleBinding.isModifierKey && toggleBinding.isModifierOnly && keyCode == toggleBinding.keyCode {
-                let modifierMask = Self.modifierMask(for: keyCode)
-                let isPressed = flags.contains(modifierMask)
+                // One physical key: read the device-dependent bit so the other side
+                // being held cannot keep this one latched.
+                let deviceMask = Self.deviceModifierMask(for: keyCode)
+                let detectMask = deviceMask.rawValue != 0 ? deviceMask : Self.modifierMask(for: keyCode)
+                let isPressed = flags.contains(detectMask)
                 
                 if isPressed && !toggleModifierIsDown {
                     // Toggle modifier pressed - toggle immediately!
@@ -236,8 +239,11 @@ public final class RightCommandSuppressor: @unchecked Sendable {
             
             // Dynamic hanja key — modifier key, single-key binding (only if different from toggle key)
             if hanjaBinding.isModifierKey && hanjaBinding.isModifierOnly && keyCode == hanjaBinding.keyCode && keyCode != toggleBinding.keyCode {
-                let modifierMask = Self.modifierMask(for: keyCode)
-                let isPressed = flags.contains(modifierMask)
+                // One physical key: read the device-dependent bit so the other side
+                // being held cannot keep this one latched.
+                let deviceMask = Self.deviceModifierMask(for: keyCode)
+                let detectMask = deviceMask.rawValue != 0 ? deviceMask : Self.modifierMask(for: keyCode)
+                let isPressed = flags.contains(detectMask)
                 
                 if isPressed && !hanjaModifierIsDown {
                     hanjaModifierIsDown = true
@@ -297,9 +303,9 @@ public final class RightCommandSuppressor: @unchecked Sendable {
             // When toggle modifier is held, strip its modifier from key events
             // This makes keys act as regular character input, not shortcuts
             if priTypeToggleEnabled && toggleModifierIsDown && toggleBinding.isModifierKey {
-                let modifierMask = Self.modifierMask(for: toggleBinding.keyCode)
                 var newFlags = event.flags
-                newFlags.remove(modifierMask)
+                newFlags.remove(Self.modifierMask(for: toggleBinding.keyCode))
+                newFlags.remove(Self.deviceModifierMask(for: toggleBinding.keyCode))
                 event.flags = newFlags
                 DebugLogger.log("RightCommandSuppressor: Key with toggle modifier - stripped modifier (normal input)")
                 return Unmanaged.passUnretained(event)
@@ -311,8 +317,10 @@ public final class RightCommandSuppressor: @unchecked Sendable {
     
     // MARK: - Helpers
     
-    /// Get the CGEventFlags modifier mask for a given keyCode
-    private static func modifierMask(for keyCode: Int64) -> CGEventFlags {
+    /// Side-agnostic mask for a keyCode. Use this to STRIP a modifier from a key
+    /// event; never to decide whether the bound key is down, because the left and
+    /// right key of one modifier share these bits.
+    static func modifierMask(for keyCode: Int64) -> CGEventFlags {
         switch keyCode {
         case 54, 55: return .maskCommand       // Right/Left Command
         case 61, 58: return .maskAlternate      // Right/Left Option
@@ -320,6 +328,26 @@ public final class RightCommandSuppressor: @unchecked Sendable {
         case 56, 60: return .maskShift          // Left/Right Shift
         case 57:     return .maskAlphaShift     // Caps Lock
         default:     return CGEventFlags(rawValue: 0)
+        }
+    }
+
+    /// Device-dependent mask identifying ONE physical modifier key
+    /// (IOLLEvent.h NX_DEVICE*KEYMASK). The toggle is a single key, so press and
+    /// release must be read from these bits: with the shared bits, releasing the
+    /// bound key while the other side is still held leaves the "held" latch set
+    /// forever, and the strip branch then eats the modifier off every later key
+    /// event — Cmd+C types a literal "c".
+    static func deviceModifierMask(for keyCode: Int64) -> CGEventFlags {
+        switch keyCode {
+        case 55: return CGEventFlags(rawValue: 0x00000008)   // Left Command
+        case 54: return CGEventFlags(rawValue: 0x00000010)   // Right Command
+        case 58: return CGEventFlags(rawValue: 0x00000020)   // Left Option
+        case 61: return CGEventFlags(rawValue: 0x00000040)   // Right Option
+        case 59: return CGEventFlags(rawValue: 0x00000001)   // Left Control
+        case 62: return CGEventFlags(rawValue: 0x00002000)   // Right Control
+        case 56: return CGEventFlags(rawValue: 0x00000002)   // Left Shift
+        case 60: return CGEventFlags(rawValue: 0x00000004)   // Right Shift
+        default: return CGEventFlags(rawValue: 0)
         }
     }
     

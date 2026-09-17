@@ -60,6 +60,36 @@ public struct KeyBinding: Codable, Equatable, Sendable {
         modifiers == 0
     }
     
+    /// Key codes that are safe to bind on their own. The event tap consumes the
+    /// bound key globally, so a bare printable or essential key (Space, Return,
+    /// a letter) disappears from the whole system — including from this app's own
+    /// settings window, leaving `defaults write` as the only way back. Function
+    /// keys type nothing, so binding one alone is fine.
+    private static let bareBindableKeyCodes: Set<Int64> = [
+        122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111,   // F1-F12
+        105, 107, 113, 106, 64, 79, 80, 90                        // F13-F20
+    ]
+
+    /// Repair a persisted binding that would steal a key the user needs. Older
+    /// builds saved whatever the recorder captured, so an existing install can
+    /// hold one — and its owner cannot type that key to fix it.
+    public static func sanitizedToggle(_ decoded: KeyBinding) -> KeyBinding {
+        decoded.isSafeAsBinding ? decoded : .defaultToggle
+    }
+
+    public static func sanitizedHanja(_ decoded: KeyBinding) -> KeyBinding {
+        decoded.isSafeAsBinding ? decoded : .defaultHanja
+    }
+
+    /// Whether this binding can be installed without stealing a key the user needs.
+    public var isSafeAsBinding: Bool {
+        // Caps Lock and Fn are not deliverable as PriType toggles.
+        if keyCode == 57 || keyCode == 63 { return false }
+        if isModifierKey { return true }
+        if modifiers != 0 { return true }
+        return Self.bareBindableKeyCodes.contains(keyCode)
+    }
+
     /// Whether the bound key is a modifier key (Command, Option, Control, Shift, CapsLock)
     /// Modifier keys generate `flagsChanged` events; regular keys generate `keyDown` events.
     public var isModifierKey: Bool {
@@ -420,7 +450,7 @@ public final class ConfigurationManager: ConfigurationProviding, @unchecked Send
             if let data = defaults.data(forKey: Keys.toggleKeyBinding),
                let decoded = try? JSONDecoder().decode(KeyBinding.self, from: data) {
                 // Fn and Caps Lock are not supported as PriType custom toggle keys.
-                binding = (decoded.keyCode == 63 || decoded.keyCode == 57) ? .defaultToggle : decoded
+                binding = KeyBinding.sanitizedToggle(decoded)
             } else {
                 // Migrate from legacy toggleKey
                 binding = toggleKey.asKeyBinding
@@ -454,7 +484,7 @@ public final class ConfigurationManager: ConfigurationProviding, @unchecked Send
             if let data = defaults.data(forKey: Keys.hanjaKeyBinding),
                let decoded = try? JSONDecoder().decode(KeyBinding.self, from: data) {
                 // Sanitize: Fn key (63) is not supported in CGEventTap
-                binding = decoded.keyCode == 63 ? .defaultHanja : decoded
+                binding = KeyBinding.sanitizedHanja(decoded)
             } else {
                 binding = .defaultHanja
             }

@@ -965,6 +965,7 @@ struct KeyRecorderRow: View {
     let onCapsLockBlocked: () -> Void
 
     @State private var isRecording = false
+    @State private var rejectedBareKey = false
     @State private var isHovering = false
     @State private var monitor: Any?
     @State private var pulseAnimation = false
@@ -1006,9 +1007,11 @@ struct KeyRecorderRow: View {
                             .opacity(pulseAnimation ? 0.6 : 1.0)
                             .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulseAnimation)
 
-                        Text(L10n.keyBinding.recording)
+                        Text(rejectedBareKey ? L10n.keyBinding.bareKeyRejected : L10n.keyBinding.recording)
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(rejectedBareKey ? .orange : .blue)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                     } else {
                         Text(valueOverride ?? binding.displayName)
                             .font(.system(size: 12, weight: .semibold))
@@ -1090,6 +1093,14 @@ struct KeyRecorderRow: View {
                     modifiers: UInt64(modifiers),
                     displayName: KeyBinding.generateDisplayName(keyCode: keyCode, modifiers: UInt64(modifiers))
                 )
+                // The event tap consumes the bound key system-wide. Taking a bare
+                // printable key here would remove it everywhere, this window
+                // included, so keep recording instead of locking the user out.
+                guard newBinding.isSafeAsBinding else {
+                    rejectedBareKey = true
+                    return nil  // Consume, stay in recording mode
+                }
+                rejectedBareKey = false
                 binding = newBinding
                 stopRecording()
                 return nil  // Consume event
@@ -1099,6 +1110,7 @@ struct KeyRecorderRow: View {
     }
 
     private func stopRecording() {
+        rejectedBareKey = false
         isRecording = false
         pulseAnimation = false
         if let monitor = monitor {
