@@ -15,9 +15,11 @@ EOF
 }
 
 AS_PATCHTYPE=0
+BUILD_CONFIG=release
 for arg in "$@"; do
     case "$arg" in
         --as-patchtype) AS_PATCHTYPE=1 ;;
+        --debug) BUILD_CONFIG=debug ;;
         -h|--help) usage; exit 0 ;;
         *)
             echo "Unknown argument: $arg" >&2
@@ -39,7 +41,7 @@ else
     SYSTEM_ONLY=0
 fi
 
-BUILD_DIR=".build/release"
+BUILD_DIR=".build/$BUILD_CONFIG"
 STAGE_DIR=".build/ime-bundle"
 APP_BUNDLE="${STAGE_DIR}/${APP_NAME}.app"
 CONTENTS_DIR="${APP_BUNDLE}/Contents"
@@ -104,32 +106,57 @@ EOF
 EOF
 }
 
+# Stage beside the destination and swap, rather than ditto-ing into the live
+# bundle. ditto MERGES: a file the build no longer produces stays behind forever.
+# That happened when PriType_PriTypeCore.bundle moved to a Contents/ layout — the
+# flat copy survived, so codesign reported "a sealed resource is missing or
+# invalid" and the signature no longer validated. A broken seal voids the TCC
+# match for the signing identity, which is what makes the Accessibility grant
+# stick across rebuilds. Swapping keeps $dest exactly the new bundle, and it is
+# absent only for the rename rather than for a whole copy.
 copy_to_system() {
     local src="$1"
     local dest="$2"
-    # Never delete $dest after copying into it. Remove only leftover names.
+    local helper
+    helper=$(mktemp "${TMPDIR:-/tmp}/pritype-install.XXXXXX")
+    cat > "$helper" <<'SH'
+set -e
+src="$1"
+dest="$2"
+rm -rf "$dest.new" "$dest.old"
+ditto "$src" "$dest.new"
+if [ -d "$dest" ]; then
+    mv "$dest" "$dest.old"
+fi
+mv "$dest.new" "$dest"
+rm -rf "$dest.old"
+# Leftover names from older installs.
+rm -rf "/Library/Input Methods/PatchType.app" \
+       "/Library/Input Methods/PriType.app" \
+       "/tmp/PriTypeV2.app.disabled"
+SH
+
     if sudo -n true 2>/dev/null; then
-        sudo ditto "$src" "$dest"
-        sudo rm -rf \
-            "/Library/Input Methods/PatchType.app" \
-            "/Library/Input Methods/PriType.app" \
-            "/tmp/PriTypeV2.app.disabled"
+        sudo /bin/bash "$helper" "$src" "$dest"
+        rm -f "$helper"
         return 0
     fi
 
     echo "Administrator access is required to install into /Library/Input Methods."
     echo "A password dialog may appear."
-    osascript - "$src" "$dest" <<'APPLESCRIPT'
+    osascript - "$helper" "$src" "$dest" <<'APPLESCRIPT'
 on run argv
-    set src to item 1 of argv
-    set dest to item 2 of argv
-    do shell script "ditto " & quoted form of src & " " & quoted form of dest & " && rm -rf '/Library/Input Methods/PatchType.app' '/Library/Input Methods/PriType.app' '/tmp/PriTypeV2.app.disabled'" with administrator privileges
+    set helper to item 1 of argv
+    set src to item 2 of argv
+    set dest to item 3 of argv
+    do shell script "/bin/bash " & quoted form of helper & " " & quoted form of src & " " & quoted form of dest with administrator privileges
 end run
 APPLESCRIPT
+    rm -f "$helper"
 }
 
-echo "Building release..."
-swift build -c release --product PriType
+echo "Building $BUILD_CONFIG..."
+swift build -c "$BUILD_CONFIG" --product PriType
 
 echo "Creating bundle structure at $APP_BUNDLE..."
 rm -rf "$STAGE_DIR"
@@ -210,7 +237,10 @@ else
 fi
 
 xattr -cr "$INSTALL_PATH" 2>/dev/null || true
-killall TextInputMenuAgent TextInputSwitcher keyboardservicesd imklaunchagent PriTypeV2 PatchType 2>/dev/null || true
+# System text-input agents only. The IME itself was killed above; killing it again
+# makes macOS relaunch it a second time, and each launch with no Accessibility
+# grant opens another Settings pane (main.swift requests it on startup).
+killall TextInputMenuAgent TextInputSwitcher keyboardservicesd imklaunchagent 2>/dev/null || true
 
 echo "Installation complete: $INSTALL_PATH"
 if [ "$AS_PATCHTYPE" -eq 1 ]; then
