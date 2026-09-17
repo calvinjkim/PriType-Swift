@@ -283,7 +283,7 @@ public final class RightCommandSuppressor: @unchecked Sendable {
                 } else {
                     // Combo toggle (e.g., Control+Space, Option+G)
                     let requiredFlags = CGEventFlags(rawValue: toggleBinding.modifiers)
-                    if Self.hasRequiredModifiers(flags: event.flags, required: requiredFlags) {
+                    if Self.modifiersMatch(flags: event.flags, required: requiredFlags) {
                         DebugLogger.log("RightCommandSuppressor: Combo toggle (\(toggleBinding.displayName)) - TOGGLE triggered")
                         triggerToggle()
                         return nil
@@ -293,7 +293,7 @@ public final class RightCommandSuppressor: @unchecked Sendable {
             
             // Regular key (non-modifier) as hanja — single key or combo
             if keyCode == hanjaBinding.keyCode && !hanjaBinding.isModifierKey && keyCode != toggleBinding.keyCode {
-                if hanjaBinding.isModifierOnly || Self.hasRequiredModifiers(flags: event.flags, required: CGEventFlags(rawValue: hanjaBinding.modifiers)) {
+                if hanjaBinding.isModifierOnly || Self.modifiersMatch(flags: event.flags, required: CGEventFlags(rawValue: hanjaBinding.modifiers)) {
                     DebugLogger.log("RightCommandSuppressor: Regular key hanja (\(hanjaBinding.displayName)) - HANJA")
                     triggerHanjaLookup()
                     return nil
@@ -351,9 +351,18 @@ public final class RightCommandSuppressor: @unchecked Sendable {
         }
     }
     
-    /// Check if event flags contain required modifier flags
-    private static func hasRequiredModifiers(flags: CGEventFlags, required: CGEventFlags) -> Bool {
-        return flags.intersection(required) == required
+    /// Modifier bits a binding can name. Caps Lock, numeric-pad and function bits
+    /// ride along on real events and are not part of a binding.
+    private static let bindableModifiers: CGEventFlags = [
+        .maskCommand, .maskAlternate, .maskControl, .maskShift
+    ]
+
+    /// Whether `flags` names exactly the binding's modifiers.
+    ///
+    /// A subset test would let a richer combination match: with Control+Space bound,
+    /// Control+Command+Space (the macOS Emoji picker) matched too and was swallowed.
+    static func modifiersMatch(flags: CGEventFlags, required: CGEventFlags) -> Bool {
+        flags.intersection(bindableModifiers) == required.intersection(bindableModifiers)
     }
 
     private func triggerToggle() {

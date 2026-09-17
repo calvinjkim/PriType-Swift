@@ -53,6 +53,19 @@ struct DirectInsertionPlan: Equatable {
     let bailed: Bool
 }
 
+/// Whether `InputSession.finalize` may skip re-inserting the composed syllable.
+///
+/// Direct insertion writes the in-progress syllable into the document as real
+/// text, so finalizing must not insert it a second time. A `DirectInsertionAdapter`
+/// that degraded to marked text at runtime did NOT write it: the syllable exists
+/// only in the host's marked range, and the host drops that on focus loss — so
+/// keying this off the adapter's type loses the text.
+enum CompositionFinalizePlan {
+    static func skipsReinsertion(deliveryMode: InputDeliveryMode, renderingMarkedFallback: Bool) -> Bool {
+        deliveryMode == .directInsertion && !renderingMarkedFallback
+    }
+}
+
 enum DirectInsertionPlanner {
     /// Same sanity ceiling used elsewhere to reject Chromium's garbage range values.
     static let maxReasonableLocation = 10_000_000
@@ -79,6 +92,21 @@ enum DirectInsertionPlanner {
               caret >= livePreeditLength,
               caret < maxReasonableLocation else { return false }
         return actualSubstring == expectedText
+    }
+
+    /// The range of already-written live preedit to delete before degrading to
+    /// marked text. Bailing used to leave that real text in the document and then
+    /// draw the same syllable again as marked text, so the host kept both.
+    ///
+    /// Uses our own record of where the last write landed, not the host's current
+    /// selection — the bail happens precisely because that selection is unusable.
+    /// Returns nil when there is nothing tracked or the record is not coherent.
+    static func removalRangeOnBail(livePreeditLength: Int, expectedCaret: Int) -> NSRange? {
+        guard livePreeditLength > 0,
+              expectedCaret != NSNotFound,
+              expectedCaret >= livePreeditLength,
+              expectedCaret < maxReasonableLocation else { return nil }
+        return NSRange(location: expectedCaret - livePreeditLength, length: livePreeditLength)
     }
 
     /// Compute the rewrite plan.

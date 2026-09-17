@@ -56,3 +56,39 @@ struct ModifierMaskTests {
         #expect(RightCommandSuppressor.deviceModifierMask(for: 0).rawValue == 0)
     }
 }
+
+// MARK: - A combo binding must not swallow richer combos
+
+/// hasRequiredModifiers was a subset test, so Control+Space also matched
+/// Control+Command+Space (the macOS Emoji picker) and swallowed it.
+@Suite("ComboModifierMatch")
+struct ComboModifierMatchTests {
+    private let control = CGEventFlags.maskControl
+    private let command = CGEventFlags.maskCommand
+    private let shift = CGEventFlags.maskShift
+
+    @Test("An exact modifier set matches")
+    func exactMatch() {
+        #expect(RightCommandSuppressor.modifiersMatch(flags: control, required: control))
+    }
+
+    @Test("A richer combo does not match a narrower binding")
+    func supersetRejected() {
+        #expect(!RightCommandSuppressor.modifiersMatch(flags: control.union(command), required: control),
+                "Control+Command+Space must reach the Emoji picker, not toggle the language")
+        #expect(!RightCommandSuppressor.modifiersMatch(flags: control.union(shift), required: control))
+    }
+
+    @Test("A missing modifier does not match")
+    func subsetRejected() {
+        #expect(!RightCommandSuppressor.modifiersMatch(flags: control, required: control.union(command)))
+    }
+
+    @Test("Incidental non-modifier flags are ignored")
+    func nonModifierFlagsIgnored() {
+        // Caps Lock / numeric-pad / function bits ride along on real events and
+        // must not stop a binding from matching.
+        let noisy = control.union(.maskAlphaShift).union(.maskNumericPad).union(.maskSecondaryFn)
+        #expect(RightCommandSuppressor.modifiersMatch(flags: noisy, required: control))
+    }
+}

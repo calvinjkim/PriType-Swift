@@ -4,7 +4,7 @@ import InputMethodKit
 // MARK: - InputDeliveryMode
 
 /// How composition output reaches the focused client.
-enum InputDeliveryMode: Equatable {
+public enum InputDeliveryMode: Equatable {
     case immediate          // Finder desktop: defer, no marked window
     case directInsertion    // EXPERIMENTAL: real-text in-place rewrite
     case markedText         // Default: canonical marked-text composition
@@ -123,6 +123,9 @@ class BaseClientAdapter: NSObject, HangulComposerDelegate {
 
     /// Host bundle id, for engine-tuned preedit styling.
     let bundleId: String
+
+    /// Configured mode unless a subclass degrades at runtime.
+    var effectiveDeliveryMode: InputDeliveryMode { deliveryMode }
 
     /// Engine-tuned attributes for the composition preedit (effective only on
     /// macOS versions that honor IME attributes — see `PreeditUnderline`).
@@ -303,6 +306,18 @@ final class DirectInsertionAdapter: BaseClientAdapter {
     /// degrade to marked text for the rest of the session rather than strand text.
     private var fellBackToMarked = false
 
+    /// True once this adapter degraded to marked text. The syllable then lives in
+    /// the host's marked range, not in the document, which changes what finalize
+    /// has to do.
+    var isRenderingMarkedFallback: Bool { fellBackToMarked }
+
+    /// `deliveryMode` stays `.directInsertion` so the session does not rebuild this
+    /// adapter on every keystroke after a fallback; this reports what is really
+    /// happening to the text.
+    override var effectiveDeliveryMode: InputDeliveryMode {
+        fellBackToMarked ? .markedText : .directInsertion
+    }
+
     /// Clear live-preedit tracking. Called by the session whenever composition
     /// ends out-of-band (focus loss, mouse-click commit, secure passthrough). Also
     /// re-arms direct insertion: a clean finalize lets a host that momentarily
@@ -382,6 +397,12 @@ final class DirectInsertionAdapter: BaseClientAdapter {
         if plan.bailed {
             // Document access unreliable: degrade to marked text to avoid stranding
             // a half-jamo. (Should be rare — probe + denylist gate this.)
+            // The live preedit is REAL text we already wrote. Remove it before the
+            // marked-text path draws the same syllable, or the host keeps both.
+            if let stale = DirectInsertionPlanner.removalRangeOnBail(
+                livePreeditLength: livePreeditLength, expectedCaret: expectedCaret) {
+                client.insertText("", replacementRange: stale)
+            }
             fellBackToMarked = true
             livePreeditLength = 0
             livePreeditText = ""
