@@ -122,10 +122,16 @@ struct DirectInsertionDenylistTests {
             "com.microsoft.VSCode",
             "com.tinyspeck.slackmacgap",
             "com.google.Chrome",
-            "org.mozilla.firefox",
-            "com.apple.Safari"
+            "org.mozilla.firefox"
         ] {
             #expect(ClientCompatibilityPolicy.directInsertionDenied(bundleId: id), "should deny \(id)")
+        }
+    }
+
+    @Test("WebKit browsers are exempt — the denial's evidence was Electron/Chromium")
+    func webKitExempt() {
+        for id in ["com.apple.Safari", "com.apple.SafariTechnologyPreview"] {
+            #expect(!ClientCompatibilityPolicy.directInsertionDenied(bundleId: id), "should allow \(id)")
         }
     }
 

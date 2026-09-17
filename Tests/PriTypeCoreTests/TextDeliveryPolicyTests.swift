@@ -240,3 +240,45 @@ struct MarkedTextReplacementTests {
         ) == notFound)
     }
 }
+
+// MARK: - Safari direct insertion
+
+/// The denylist's evidence ("every keystroke tripped the caret-stability guard")
+/// was gathered on Electron/Chromium. WebKit reports a usable selection, and
+/// Apple's own Korean IME composes cleanly in Confluence where PriType's
+/// per-syllable marked-text commit splits the ProseMirror block. Direct insertion
+/// never ends a composition, so there is nothing for ProseMirror to reconcile.
+/// The adapter still bails to marked text at runtime if the caret misbehaves.
+@Suite("SafariDirectInsertion")
+struct SafariDirectInsertionTests {
+    private func context(_ bundleId: String, documentAccessSafe: Bool) -> ClientContext {
+        ClientContext(
+            bundleId: bundleId,
+            hasTextInputCapability: true,
+            isLikelyDesktopArea: false,
+            documentAccessSafe: documentAccessSafe
+        )
+    }
+
+    @Test("Safari with usable document access gets direct insertion")
+    func safariGetsDirectInsertion() {
+        #expect(TextDeliveryPolicy.mode(for: context("com.apple.Safari", documentAccessSafe: true)) == .directInsertion)
+    }
+
+    @Test("Safari without usable document access stays on marked text")
+    func safariFallsBackWithoutDocumentAccess() {
+        #expect(TextDeliveryPolicy.mode(for: context("com.apple.Safari", documentAccessSafe: false)) == .markedText)
+    }
+
+    @Test("Blink hosts stay denied — the denylist evidence was gathered there")
+    func blinkStaysDenied() {
+        for id in ["com.google.Chrome", "com.anthropic.claudefordesktop", "com.microsoft.VSCode"] {
+            #expect(TextDeliveryPolicy.mode(for: context(id, documentAccessSafe: true)) == .markedText, "\(id) must stay on marked text")
+        }
+    }
+
+    @Test("Safari remains a web content host")
+    func safariStaysWebContentHost() {
+        #expect(ClientCompatibilityPolicy.isWebContentHost(bundleId: "com.apple.Safari"))
+    }
+}

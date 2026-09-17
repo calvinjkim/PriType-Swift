@@ -113,6 +113,17 @@ public enum ClientCompatibilityPolicy {
         "com.nousresearch.hermes.setup"
     ]
 
+    /// WebKit browsers: on the denylist as web-content hosts, but exempt from the
+    /// direct-insertion denial. That denial's evidence ("every keystroke tripped the
+    /// caret-stability guard") was gathered on Electron/Chromium; WebKit reports a
+    /// usable selection. It matters because the marked-text path ends a composition
+    /// on every Hangul syllable, and ProseMirror (Confluence) reconciles an empty
+    /// block into two on that composition end. Direct insertion never ends one.
+    private static let webKitDirectInsertionAllowed: Set<String> = [
+        "com.apple.Safari",
+        "com.apple.SafariTechnologyPreview"
+    ]
+
     /// Apps where experimental direct insertion is known to be IMPOSSIBLE, not just
     /// risky: Electron/Chromium and browser web-content fields report `selectedRange`
     /// and `attributedSubstring` asynchronously / inaccurately, so the in-place
@@ -158,7 +169,7 @@ public enum ClientCompatibilityPolicy {
     /// Chromium has incorporated IMK marked text, dropping only the final Hangul
     /// syllable. Prefer real-text composition there when document access is usable.
     public static func prefersDirectInsertionForComposition(bundleId: String) -> Bool {
-        hermesBundleIds.contains(bundleId)
+        hermesBundleIds.contains(bundleId) || webKitDirectInsertionAllowed.contains(bundleId)
     }
 
     /// Whether `bundleId` is a browser / Electron / CEF / Atlassian web editor.
@@ -179,6 +190,7 @@ public enum ClientCompatibilityPolicy {
     /// reliably support in-place real-text rewrites (Electron/Chromium/browsers).
     /// Explicit list + a keyword heuristic for unlisted Electron/Chromium wrappers.
     public static func directInsertionDenied(bundleId: String) -> Bool {
+        if webKitDirectInsertionAllowed.contains(bundleId) { return false }
         if directInsertionDenylist.contains(bundleId) { return true }
         let lower = bundleId.lowercased()
         return lower.contains("electron")
