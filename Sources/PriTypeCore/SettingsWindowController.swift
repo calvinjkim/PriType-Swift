@@ -210,15 +210,14 @@ struct SettingsView: View {
                 icon: "command"
             ) {
                 VStack(spacing: 0) {
+                    // The toggle key stays configurable regardless of the macOS Caps Lock
+                    // switch: both paths change the same PriType 한/영 state.
                     KeyRecorderRow(
                         label: L10n.keyBinding.toggleKey,
                         icon: "globe",
                         binding: $toggleKeyBinding,
                         conflictBinding: hanjaKeyBinding,
                         hasConflict: $hasKeyConflict,
-                        isDisabled: capsLockSwitchEnabled,
-                        disabledReason: L10n.keyBinding.disabledByCapsLock,
-                        valueOverride: capsLockSwitchEnabled ? L10n.keyBinding.managedByMacOS : nil,
                         onCapsLockBlocked: { showCapsLockBlockedAlert = true }
                     )
 
@@ -232,9 +231,6 @@ struct SettingsView: View {
                         binding: $hanjaKeyBinding,
                         conflictBinding: toggleKeyBinding,
                         hasConflict: $hasKeyConflict,
-                        isDisabled: false,
-                        disabledReason: nil,
-                        valueOverride: nil,
                         onCapsLockBlocked: { showCapsLockBlockedAlert = true }
                     )
 
@@ -664,9 +660,10 @@ struct SettingsView: View {
             DispatchQueue.main.async {
                 self.isAccessibilityGranted = true
 
-                // Same wiring as launch, including the IOKit fallback this
-                // path used to leave unregistered.
-                KeyMonitoring.armIfNeeded()
+                // Auto-start key monitoring that was skipped at launch. Idempotent;
+                // wiring and fallback live in ToggleKeyMonitor (same as main.swift).
+                let started = ToggleKeyMonitor.start()
+                DebugLogger.log("Accessibility granted: toggle key monitor start = \(started)")
             }
         }
     }
@@ -951,9 +948,6 @@ struct KeyRecorderRow: View {
     @Binding var binding: KeyBinding
     let conflictBinding: KeyBinding
     @Binding var hasConflict: Bool
-    let isDisabled: Bool
-    let disabledReason: String?
-    let valueOverride: String?
     let onCapsLockBlocked: () -> Void
 
     @State private var isRecording = false
@@ -970,20 +964,12 @@ struct KeyRecorderRow: View {
                 Text(label)
                     .font(.system(size: 14, weight: .regular))
                     .foregroundStyle(.primary)
-
-                if isDisabled, let disabledReason {
-                    Text(disabledReason)
-                        .font(.system(size: 11, weight: .regular))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
             }
             .layoutPriority(1)
 
             Spacer()
 
             Button(action: {
-                guard !isDisabled else { return }
                 if isRecording {
                     stopRecording()
                 } else {
@@ -1005,7 +991,7 @@ struct KeyRecorderRow: View {
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                     } else {
-                        Text(valueOverride ?? binding.displayName)
+                        Text(binding.displayName)
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
@@ -1015,20 +1001,13 @@ struct KeyRecorderRow: View {
             .buttonStyle(.bordered)
             .buttonBorderShape(.capsule)
             .controlSize(.small)
-            .disabled(isDisabled)
             .tint(isRecording ? Color.blue : nil)
             .onHover { hover in
                 isHovering = hover
             }
         }
-        .opacity(isDisabled ? 0.62 : 1)
         .padding(.vertical, 10)
         .padding(.horizontal, 12)
-        .onChange(of: isDisabled) { _, disabled in
-            if disabled {
-                stopRecording()
-            }
-        }
         .onDisappear {
             stopRecording()
         }

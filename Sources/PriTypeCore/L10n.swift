@@ -71,15 +71,12 @@ public enum L10n {
         public static var conflict: String { localized("keyBinding.conflict") }
         public static var conflictRestored: String { localized("keyBinding.conflictRestored") }
         public static var reset: String { localized("keyBinding.reset") }
-        public static var capsLockSummary: String { String(format: localized("keyBinding.capsLockSummary"), app.name) }
         public static var capsLockStatusTitle: String { localized("keyBinding.capsLockStatusTitle") }
         public static var capsLockStatusOn: String { localized("keyBinding.capsLockStatusOn") }
         public static var capsLockStatusOff: String { localized("keyBinding.capsLockStatusOff") }
-        public static var capsLockOnDescription: String { String(format: localized("keyBinding.capsLockOnDescription"), app.name) }
-        public static var capsLockOffDescription: String { String(format: localized("keyBinding.capsLockOffDescription"), app.name) }
-        public static var disabledByCapsLock: String { localized("keyBinding.disabledByCapsLock") }
+        public static var capsLockOnDescription: String { localized("keyBinding.capsLockOnDescription") }
+        public static var capsLockOffDescription: String { localized("keyBinding.capsLockOffDescription") }
         public static var bareKeyRejected: String { localized("keyBinding.bareKeyRejected") }
-        public static var managedByMacOS: String { localized("keyBinding.managedByMacOS") }
         public static var capsLockBlockedTitle: String { localized("keyBinding.capsLockBlockedTitle") }
         public static var capsLockBlockedMessage: String { String(format: localized("keyBinding.capsLockBlockedMessage"), app.name) }
         public static var capsLockOpenSettings: String { localized("keyBinding.capsLockOpenSettings") }

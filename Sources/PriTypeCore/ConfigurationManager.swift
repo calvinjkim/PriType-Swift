@@ -103,7 +103,46 @@ public struct KeyBinding: Codable, Equatable, Sendable {
         default:     return false
         }
     }
+
+    /// `CGEventFlags` bit that is set while this modifier key is held (0 for regular
+    /// keys and for Fn, which CGEventTap cannot observe as a flag). Single source of
+    /// truth for the key-code → flag mapping used by the toggle-key monitor.
+    public var modifierFlagMask: UInt64 {
+        switch keyCode {
+        case 54, 55: return CGEventFlags.maskCommand.rawValue     // Right/Left Command
+        case 61, 58: return CGEventFlags.maskAlternate.rawValue   // Right/Left Option
+        case 62, 59: return CGEventFlags.maskControl.rawValue     // Right/Left Control
+        case 56, 60: return CGEventFlags.maskShift.rawValue       // Left/Right Shift
+        case 57:     return CGEventFlags.maskAlphaShift.rawValue  // Caps Lock
+        default:     return 0
+        }
+    }
     
+    /// Device-dependent mask naming ONE physical modifier key
+    /// (IOLLEvent.h NX_DEVICE*KEYMASK). `modifierFlagMask` is shared by the left
+    /// and right key, so releasing the bound key while the other side is held
+    /// never cleared the "held" latch and every later key event lost its
+    /// modifier — Cmd+C typed a literal "c".
+    public var deviceModifierFlagMask: UInt64 {
+        switch keyCode {
+        case 55: return 0x00000008   // Left Command
+        case 54: return 0x00000010   // Right Command
+        case 58: return 0x00000020   // Left Option
+        case 61: return 0x00000040   // Right Option
+        case 59: return 0x00000001   // Left Control
+        case 62: return 0x00002000   // Right Control
+        case 56: return 0x00000002   // Left Shift
+        case 60: return 0x00000004   // Right Shift
+        default: return 0
+        }
+    }
+
+    /// Mask to test press/release against: the one physical key when it has a
+    /// device bit, otherwise the shared bit (Caps Lock).
+    public var pressDetectionFlagMask: UInt64 {
+        deviceModifierFlagMask != 0 ? deviceModifierFlagMask : modifierFlagMask
+    }
+
     /// Default toggle key: Right Command
     public static let defaultToggle = KeyBinding(keyCode: 54, modifiers: 0, displayName: "우측 Command")
     
@@ -271,7 +310,8 @@ public protocol ConfigurationProviding: AnyObject, Sendable {
     /// Whether Control+Space is configured as the toggle key
     var controlSpaceAsToggle: Bool { get }
 
-    /// Whether macOS owns Caps Lock input-source switching.
+    /// Whether macOS "Caps Lock으로 입력 소스 전환" is on. Informational (Settings
+    /// status card); it does NOT gate PriType's own toggle key.
     var capsLockInputSourceSwitchEnabled: Bool { get }
     
     /// Whether the system double-space period feature is enabled.
@@ -430,9 +470,6 @@ public final class ConfigurationManager: ConfigurationProviding, @unchecked Send
     // JSON decoding on every access is wasteful; cache in memory and invalidate on write.
     // Lock protects in-memory cache from races between CGEventTap thread and settings UI.
     
-    private let capsLockSwitchLock = NSLock()
-    private var cachedCapsLockSwitch: (value: Bool, readAt: TimeInterval)?
-
     private var _cachedToggleBinding: KeyBinding?
     private var _cachedHanjaBinding: KeyBinding?
     private let keyBindingLock = NSLock()
@@ -523,34 +560,12 @@ public final class ConfigurationManager: ConfigurationProviding, @unchecked Send
 
     /// Mirrors macOS "Use the Caps Lock key to switch to and from ABC".
     ///
-    /// When this is enabled, PriType should not also run its own language
-    /// toggle key. The system input-source switch becomes the single owner.
+    /// Read by the Settings status card only. It does not gate the custom toggle
+    /// key: with two registered PriType modes, Caps Lock (macOS → `setValue`
+    /// ingress) and the custom key (`performPriTypeModeTransition`) both land in
+    /// `HangulComposer.inputMode`, so there is no conflict to arbitrate. Reads
+    /// `CFPreferences`, so keep it off the keystroke hot path.
     public var capsLockInputSourceSwitchEnabled: Bool {
-        // Read on EVERY event-tap and HID callback, so a cfprefsd round trip here
-        // sits on the keystroke path and can push the tap past its deadline — three
-        // of those disable it permanently. Hold the answer briefly so a change in
-        // System Settings is still picked up within a second.
-        let now = ProcessInfo.processInfo.systemUptime
-        capsLockSwitchLock.lock()
-        if let cached = cachedCapsLockSwitch, now - cached.readAt < Self.capsLockSwitchTTL {
-            capsLockSwitchLock.unlock()
-            return cached.value
-        }
-        capsLockSwitchLock.unlock()
-
-        let value = Self.readCapsLockInputSourceSwitch()
-        capsLockSwitchLock.lock()
-        cachedCapsLockSwitch = (value: value, readAt: now)
-        capsLockSwitchLock.unlock()
-        return value
-    }
-
-    /// How long a cached answer stays usable. Short enough that toggling the system
-    /// setting takes effect without a restart, long enough to take the lookup off
-    /// the per-keystroke path.
-    static let capsLockSwitchTTL: TimeInterval = 1.0
-
-    private static func readCapsLockInputSourceSwitch() -> Bool {
         if let value = CFPreferencesCopyValue(
             "TISRomanSwitchState" as CFString,
             kCFPreferencesAnyApplication,
@@ -568,6 +583,7 @@ public final class ConfigurationManager: ConfigurationProviding, @unchecked Send
         return UserDefaults.standard.object(forKey: "TISRomanSwitchState") != nil
             && UserDefaults.standard.integer(forKey: "TISRomanSwitchState") != 0
     }
+
     
     // MARK: - Text Input Features
     

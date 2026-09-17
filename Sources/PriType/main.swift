@@ -23,7 +23,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         }
         
         // Setup toggle key monitoring
-        setupIOKit()
+        setupToggleKeyMonitoring()
         
         // Pre-load Hanja dictionary in background for instant lookup
         DispatchQueue.global(qos: .utility).async {
@@ -56,20 +56,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         return true
     }
     
-    private func setupIOKit() {
-        // Check/request Accessibility permission
+    /// Start the toggle/hanja key monitor, asking for Accessibility first if needed.
+    /// Monitor selection, callback wiring and the CGEventTap → IOKit fallback all
+    /// live in `ToggleKeyMonitor` (shared with the Settings accessibility flow).
+    private func setupToggleKeyMonitoring() {
         if !IOKitManager.hasAccessibilityPermission() {
             DebugLogger.log("Requesting Accessibility permission...")
             IOKitManager.requestAccessibilityPermission()
-            
-            // Poll until user grants permission, with a 2-minute cap so a
+
+            // Poll until the user grants permission, with a 2-minute cap so a
             // never-granted prompt cannot leave a timer running forever.
+            // activateServer re-checks afterwards, so a later grant still lands.
             let pollDeadline = Date().addingTimeInterval(120)
             Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { timer in
                 if AXIsProcessTrusted() {
                     timer.invalidate()
                     DebugLogger.log("Accessibility granted via system popup — starting key monitoring")
-                    self.setupIOKit()
+                    ToggleKeyMonitor.start()
                     return
                 }
                 if Date() >= pollDeadline {
@@ -79,9 +82,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             }
             return
         }
-        
-        KeyMonitoring.arm()
 
+        ToggleKeyMonitor.start()
         DebugLogger.log("Toggle key monitoring initialized")
     }
 }

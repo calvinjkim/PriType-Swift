@@ -167,9 +167,9 @@ public class HangulComposer: @unchecked Sendable {
     /// - Important: `inputMode` is the single source of truth for the Korean/
     ///   English state. The only sanctioned writers are
     ///   `PriTypeInputController.performPriTypeModeTransition` (custom toggle) and
-    ///   `PriTypeInputController.setValue(_:forTag:)` (macOS selecting a PriType
-    ///   mode, including the English child mode). No other path — including
-    ///   `activateServer` focus changes — may mutate the mode.
+    ///   `PriTypeInputController.setValue(_:forTag:)` (macOS selecting either
+    ///   registered PriType mode — Caps Lock or the input-source menu). No other
+    ///   path — including `activateServer` focus changes — may mutate the mode.
     public func setInputMode(_ mode: InputMode) {
         guard inputMode != mode else {
             return

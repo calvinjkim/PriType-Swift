@@ -23,10 +23,10 @@ struct ModifierMaskTests {
     @Test("Left and right of one modifier have distinct device masks")
     func deviceMasksDiffer() {
         for pair in pairs {
-            let r = RightCommandSuppressor.deviceModifierMask(for: pair.right)
-            let l = RightCommandSuppressor.deviceModifierMask(for: pair.left)
-            #expect(r.rawValue != 0, "\(pair.name): right device mask must exist")
-            #expect(l.rawValue != 0, "\(pair.name): left device mask must exist")
+            let r: UInt64 = KeyBinding(keyCode: pair.right, modifiers: 0, displayName: "").deviceModifierFlagMask
+            let l: UInt64 = KeyBinding(keyCode: pair.left, modifiers: 0, displayName: "").deviceModifierFlagMask
+            #expect(r != 0, "\(pair.name): right device mask must exist")
+            #expect(l != 0, "\(pair.name): left device mask must exist")
             #expect(r != l, "\(pair.name): left and right must not share a device bit")
         }
     }
@@ -34,9 +34,9 @@ struct ModifierMaskTests {
     @Test("A device mask isolates its own side")
     func devicePressIsolated() {
         // Left Command held, right Command not: the right key must read as up.
-        let leftCommandHeld = RightCommandSuppressor.deviceModifierMask(for: 55)
+        let leftCommandHeld = CGEventFlags(rawValue: KeyBinding(keyCode: 55, modifiers: 0, displayName: "").deviceModifierFlagMask)
             .union(.maskCommand)
-        #expect(!leftCommandHeld.contains(RightCommandSuppressor.deviceModifierMask(for: 54)),
+        #expect(!leftCommandHeld.contains(CGEventFlags(rawValue: KeyBinding(keyCode: 54, modifiers: 0, displayName: "").deviceModifierFlagMask)),
                 "right Command must read as up while only left Command is held")
         #expect(leftCommandHeld.contains(.maskCommand),
                 "the generic bit is still set, which is why it cannot be used for detection")
@@ -45,15 +45,15 @@ struct ModifierMaskTests {
     @Test("Generic masks stay shared, for stripping the modifier off a key event")
     func genericMasksShared() {
         for pair in pairs {
-            #expect(RightCommandSuppressor.modifierMask(for: pair.right)
-                    == RightCommandSuppressor.modifierMask(for: pair.left),
+            #expect(KeyBinding(keyCode: pair.right, modifiers: 0, displayName: "").modifierFlagMask
+                    == KeyBinding(keyCode: pair.left, modifiers: 0, displayName: "").modifierFlagMask,
                     "\(pair.name): the generic mask is deliberately side-agnostic")
         }
     }
 
     @Test("An unbound key has no device mask")
     func unknownKeyCode() {
-        #expect(RightCommandSuppressor.deviceModifierMask(for: 0).rawValue == 0)
+        #expect(KeyBinding(keyCode: 0, modifiers: 0, displayName: "").deviceModifierFlagMask == 0)
     }
 }
 
@@ -69,19 +69,19 @@ struct ComboModifierMatchTests {
 
     @Test("An exact modifier set matches")
     func exactMatch() {
-        #expect(RightCommandSuppressor.modifiersMatch(flags: control, required: control))
+        #expect(ToggleKeyEventClassifier.modifiersMatchForTest(flags: control, required: control))
     }
 
     @Test("A richer combo does not match a narrower binding")
     func supersetRejected() {
-        #expect(!RightCommandSuppressor.modifiersMatch(flags: control.union(command), required: control),
+        #expect(!ToggleKeyEventClassifier.modifiersMatchForTest(flags: control.union(command), required: control),
                 "Control+Command+Space must reach the Emoji picker, not toggle the language")
-        #expect(!RightCommandSuppressor.modifiersMatch(flags: control.union(shift), required: control))
+        #expect(!ToggleKeyEventClassifier.modifiersMatchForTest(flags: control.union(shift), required: control))
     }
 
     @Test("A missing modifier does not match")
     func subsetRejected() {
-        #expect(!RightCommandSuppressor.modifiersMatch(flags: control, required: control.union(command)))
+        #expect(!ToggleKeyEventClassifier.modifiersMatchForTest(flags: control, required: control.union(command)))
     }
 
     @Test("Incidental non-modifier flags are ignored")
@@ -89,6 +89,6 @@ struct ComboModifierMatchTests {
         // Caps Lock / numeric-pad / function bits ride along on real events and
         // must not stop a binding from matching.
         let noisy = control.union(.maskAlphaShift).union(.maskNumericPad).union(.maskSecondaryFn)
-        #expect(RightCommandSuppressor.modifiersMatch(flags: noisy, required: control))
+        #expect(ToggleKeyEventClassifier.modifiersMatchForTest(flags: noisy, required: control))
     }
 }

@@ -220,7 +220,9 @@ public class PriTypeInputController: IMKInputController, @unchecked Sendable {
         // Recover a permission granted after launch: the startup poll gives up
         // after two minutes and nothing else re-armed the tap, so the toggle key
         // stayed dead for the session while Settings reported it as granted.
-        KeyMonitoring.armIfNeeded()
+        if !RightCommandSuppressor.shared.isRunning && !IOKitManager.shared.isRunning {
+            ToggleKeyMonitor.start()
+        }
         #if DEBUG
         assert(Thread.isMainThread, "IMK activateServer must run on main thread")
         #endif

@@ -29,7 +29,7 @@ PriType은 Swift와 InputMethodKit으로 만든 macOS용 한글 입력기입니�
   한글 입력 중 한자키를 눌러 한자 후보를 고를 수 있습니다. 자음 입력 후 한자키를 누르면 `♥`, `★` 같은 자모 특수문자도 입력할 수 있습니다.
 
 - **선택 가능한 전환키**
-  macOS Caps Lock 입력 소스 전환을 쓰지 않는 경우, 우측 Command 등 원하는 키를 PriType 한/영 전환키로 지정할 수 있습니다. Caps Lock 전환이 켜져 있으면 PriType 전환키는 자동으로 비활성화됩니다.
+  우측 Command 등 원하는 키를 PriType 한/영 전환키로 지정할 수 있습니다. macOS Caps Lock 입력 소스 전환과 함께 쓸 수 있으며, 두 키는 같은 PriType 한/영 상태를 바꿉니다.
 
 - **macOS 설정 연동**
   스페이스 두 번으로 마침표 입력은 PriType 별도 설정이 아니라 macOS 텍스트 입력 설정을 따릅니다.
@@ -48,15 +48,15 @@ PriType 앱 번들은 기본적으로 `/Library/Input Methods/PriTypeV2.app`에 
 
 ## 한/영 전환 설정
 
-### Caps Lock으로 전환
+PriType은 한글 모드와 영어 모드를 하나의 입력기 안에 두 개의 입력 모드로 등록합니다. 아래 두 전환 방법은 함께 쓸 수 있고, 어느 쪽을 눌러도 같은 한/영 상태가 바뀌며 메뉴바 표시(`한`/`A`)도 함께 맞춰집니다.
 
-macOS 설정에서 `Caps Lock 키로 ABC 입력 소스 전환`을 켜면, Caps Lock 전환은 macOS가 직접 관리합니다.
+### Caps Lock으로 전환 (macOS)
 
-이 모드에서는 PriType 설정의 별도 한/영 전환키가 비활성화됩니다. 전환 경로가 둘로 갈라지지 않도록 macOS 입력 소스 전환을 단일 기준으로 사용합니다.
+macOS 설정에서 `Caps Lock 키로 ABC 입력 소스 전환`을 켜면, macOS가 Caps Lock으로 PriType의 한글 모드와 영어 모드를 오갑니다. Caps Lock 자체를 PriType 전환키로 지정하는 방식은 지원하지 않습니다.
 
-### 우측 Command 등으로 전환
+### 우측 Command 등으로 전환 (PriType)
 
-Caps Lock 입력 소스 전환을 쓰지 않는다면 PriType 설정에서 한/영 전환키를 지정할 수 있습니다. 기본값은 우측 Command입니다.
+PriType 설정에서 한/영 전환키를 지정할 수 있습니다. 기본값은 우측 Command이며, macOS Caps Lock 전환이 켜져 있어도 그대로 동작합니다. (2.7.x에서는 Caps Lock 전환이 켜져 있으면 이 키가 비활성화되었습니다.)
 
 우측 Command 전환이 동작하지 않으면 `시스템 설정 > 개인정보 보호 및 보안 > 손쉬운 사용`에서 PriType 권한을 확인한 뒤, 필요하면 권한을 껐다 켜고 Mac을 재시동해 주세요.
 
@@ -65,8 +65,8 @@ Caps Lock 입력 소스 전환을 쓰지 않는다면 PriType 설정에서 한/�
 | 영역 | 내용 |
 | --- | --- |
 | 자판 배열 | 두벌식 표준, 세벌식 390, 두벌식 옛한글, 세벌식 옛한글 |
-| 입력 소스 | PriType 단일 입력 소스, 영어는 내부 모드 + ABC/US 레이아웃 pass-through |
-| 전환 | macOS Caps Lock 입력 소스 전환 또는 PriType 내부 사용자 지정 전환키 |
+| 입력 소스 | PriType 입력기 하나에 한글·영어 두 입력 모드, 영어는 ABC/US 레이아웃 pass-through |
+| 전환 | macOS Caps Lock 입력 소스 전환과 PriType 사용자 지정 전환키(함께 사용 가능) |
 | 한자 | 한자 후보창, 자모 특수문자 입력 |
 | 텍스트 편의 기능 | macOS 더블스페이스 마침표 설정 연동 |
 | 업데이트 | GitHub Releases 기반 자동 업데이트 확인 |
@@ -95,7 +95,7 @@ swift build
   macOS 입력 소스 설정에서 Caps Lock 전환 옵션이 켜져 있는지 확인해 주세요. PriType 설정에서 Caps Lock을 직접 전환키로 지정하는 방식은 사용하지 않습니다.
 
 - **우측 Command 전환이 안 될 때**
-  손쉬운 사용 권한이 필요합니다. 권한을 부여한 뒤에도 동작하지 않으면 PriType을 재실행하거나 Mac을 재시동해 주세요.
+  손쉬운 사용 권한이 필요합니다. 권한을 부여한 뒤에도 동작하지 않으면 PriType을 재실행하거나 Mac을 재시동해 주세요. 2.7.4 이하에서는 macOS Caps Lock 전환이 켜져 있으면 이 키가 비활성화되었으므로, 그 버전을 쓰고 있다면 업데이트해 주세요.
 
 ## 문서
 
