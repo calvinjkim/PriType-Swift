@@ -209,17 +209,6 @@ public enum ClientCompatibilityPolicy {
     /// composition to protect: the conjoining jamo is written as REAL text and is
     /// left behind when the syllable is rewritten (typing 사파이어메모 inside
     /// existing text stranded a bare `ᄉ` U+1109 in Safari).
-    /// Whether the preedit should use conjoining U+1100 jamo.
-    ///
-    /// Marked text only. Under direct insertion the preedit is REAL text, so the
-    /// jamo is left in the document when the syllable is rewritten. The delivery
-    /// mode has to come from the adapter in use, not from the bundle id: a host
-    /// configured for direct insertion still composes with marked text when the
-    /// activation probe failed or the adapter degraded mid-session, and it needs
-    /// the jamo then.
-    public static func usesRawJamoPreedit(bundleId: String, deliveryMode: InputDeliveryMode) -> Bool {
-        deliveryMode == .markedText && isWebContentHost(bundleId: bundleId)
-    }
 
     /// Web editors' empty list items often have a non-collapsed / placeholder
     /// selection. `setMarkedText` with `replacementRange = NSNotFound` then

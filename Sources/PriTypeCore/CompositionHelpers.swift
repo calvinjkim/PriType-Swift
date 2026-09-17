@@ -44,6 +44,21 @@ public struct CompositionHelpers: Sendable {
         return String(mapped.map { Character($0) })
     }
 
+    /// The preedit string to hand the host for libhangul's current buffer.
+    ///
+    /// Always compatibility jamo for a lone letter. Conjoining U+1100 jamo were
+    /// used for web editors — they keep a composition open where a compatibility
+    /// jamo reads as a finished letter — but they are defined to combine with what
+    /// follows them. Typing into the middle of existing text therefore ate the next
+    /// character when the syllable completed, reproducibly in Slack, Claude and
+    /// Chrome, and only when a real character followed: a space cannot combine with
+    /// a jamo, so a space was safe. Losing a character during ordinary typing in
+    /// every Blink host outweighs the block split the conjoining form prevented in
+    /// one editor.
+    public static func preeditString(for codePoints: [UInt32]) -> String {
+        normalizeJamoForDisplay(codePoints)
+    }
+
     /// Returns true when the string is a single standalone Jamo used as preedit.
     public static func isSingleStandaloneJamo(_ text: String) -> Bool {
         let scalars = Array(text.unicodeScalars)

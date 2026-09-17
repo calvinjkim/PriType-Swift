@@ -173,7 +173,6 @@ struct ClientContextTests {
             "com.apple.dt.Xcode"
         ] {
             #expect(!ClientCompatibilityPolicy.isWebContentHost(bundleId: id), "\(id) should stay native")
-            #expect(!ClientCompatibilityPolicy.usesRawJamoPreedit(bundleId: id, deliveryMode: .markedText))
             #expect(!ClientCompatibilityPolicy.prefersCollapsedCompositionReplacement(bundleId: id))
         }
     }
