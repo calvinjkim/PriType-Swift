@@ -54,33 +54,35 @@ struct DirectInsertionFallbackTests {
     }
 }
 
-// MARK: - Conjoining jamo must not reach a host
+// MARK: - Raw jamo depends on how the syllable is actually delivered
 
-/// Conjoining U+1100 jamo was sent as the lone-consonant preedit so a web editor
-/// would not treat it as a finished letter and split the block. It also merges
-/// with whatever follows it: typing into the middle of existing text ate the next
-/// character when the syllable completed, in Slack, Claude and Chrome alike, and
-/// only when a real character followed — a space was safe, because a space cannot
-/// combine with a jamo.
-@Suite("PreeditJamoForm")
-struct PreeditJamoFormTests {
-    @Test("A lone consonant preedit uses compatibility jamo everywhere")
-    func loneConsonantUsesCompatibilityJamo() {
-        // libhangul hands back choseong U+1105; what reaches the host must be
-        // the standalone letter U+3139, which combines with nothing.
-        let preedit = CompositionHelpers.preeditString(for: [0x1105])
-        #expect(preedit.unicodeScalars.map(\.value) == [0x3139])
+/// Conjoining U+1100 jamo keeps a MARKED composition open in a web editor. It is
+/// meaningless — and gets stranded as real text — under direct insertion. Keying
+/// it off the bundle id alone gets both cases wrong: a direct-insertion host that
+/// degrades to marked text at runtime, or whose activation probe failed, then
+/// marks compatibility jamo in ProseMirror and splits the block.
+@Suite("RawJamoByDeliveryMode")
+struct RawJamoByDeliveryModeTests {
+    @Test("A web host composing with marked text gets raw jamo")
+    func webHostMarkedTextGetsRawJamo() {
+        for id in ["com.apple.Safari", "com.google.Chrome", "com.atlassian.confluence"] {
+            #expect(ClientCompatibilityPolicy.usesRawJamoPreedit(bundleId: id, deliveryMode: .markedText),
+                    "\(id) is a web editor and its marked composition needs the jamo")
+        }
     }
 
-    @Test("A completed syllable is unchanged")
-    func completedSyllableUnchanged() {
-        // Complete syllables already arrive precomposed and must stay that way.
-        #expect(CompositionHelpers.preeditString(for: [0xB77C]) == "라")
+    @Test("The same host composing by direct insertion does not")
+    func directInsertionNeverGetsRawJamo() {
+        for id in ["com.apple.Safari", "com.google.Chrome"] {
+            #expect(!ClientCompatibilityPolicy.usesRawJamoPreedit(bundleId: id, deliveryMode: .directInsertion),
+                    "\(id) would leave the conjoining jamo in the document as real text")
+        }
     }
 
-    @Test("A lone vowel also uses compatibility jamo")
-    func loneVowelUsesCompatibilityJamo() {
-        let preedit = CompositionHelpers.preeditString(for: [0x1161])   // jungseong A
-        #expect(preedit.unicodeScalars.map(\.value) == [0x314F])
+    @Test("Native hosts keep compatibility jamo in every mode")
+    func nativeHostsUnaffected() {
+        for mode in [InputDeliveryMode.markedText, .directInsertion, .immediate] {
+            #expect(!ClientCompatibilityPolicy.usesRawJamoPreedit(bundleId: "com.kakao.KakaoTalkMac", deliveryMode: mode))
+        }
     }
 }

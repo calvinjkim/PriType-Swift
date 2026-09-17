@@ -43,20 +43,14 @@ struct HangulComposerTests {
         #expect(delegate.markedText == "안")
     }
 
-    @Test("Web hosts get compatibility jamo too, so the preedit cannot merge")
-    func webHostUsesCompatibilityJamo() {
-        // Chrome used to receive choseong U+1100, which keeps a composition open
-        // where compatibility U+3131 reads as a finished letter. Conjoining jamo
-        // are also defined to combine with what follows: typing mid-text ate the
-        // next character when the syllable completed, in Chrome, Slack and Claude,
-        // and only when a real character followed. A space could not be eaten
-        // because it cannot combine with a jamo.
+    @Test("Web hosts keep choseong jamo in preedit instead of compatibility jamo")
+    func webHostKeepsRawChoseongJamo() {
         let (composer, delegate, _) = makeComposer()
         composer.markKeystroke(bundleId: "com.google.Chrome")
         _ = composer.handle(TestEventFactory.keyEvent(char: "r", keyCode: 15)!, delegate: delegate)
 
-        #expect(delegate.markedText == "\u{3131}",
-                "preedit must be the standalone letter, which combines with nothing; got '\(delegate.markedText)'")
+        #expect(delegate.markedText == "\u{1100}",
+                "Chrome preedit must stay U+1100 so the host keeps composition open; got '\(delegate.markedText)'")
         #expect(delegate.insertedTexts.isEmpty, "First choseong must not commit")
     }
 

@@ -496,7 +496,17 @@ public class HangulComposer: @unchecked Sendable {
 
         // Update preedit text (the single live syllable).
         if !preedit.isEmpty {
-            delegate.setMarkedText(CompositionHelpers.preeditString(for: preedit))
+            let preeditStr: String
+            if ClientCompatibilityPolicy.usesRawJamoPreedit(
+                bundleId: lastInputBundleId,
+                deliveryMode: delegate.effectiveDeliveryMode) {
+                // Keep U+1100 choseong so web hosts do not compositionend after the
+                // first jamo (compatibility U+3131 looks like a finished letter).
+                preeditStr = CompositionHelpers.convertToString(preedit)
+            } else {
+                preeditStr = CompositionHelpers.normalizeJamoForDisplay(preedit)
+            }
+            delegate.setMarkedText(preeditStr)
         } else {
              delegate.setMarkedText("")
         }
