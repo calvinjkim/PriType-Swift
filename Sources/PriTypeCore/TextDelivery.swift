@@ -333,7 +333,8 @@ final class DirectInsertionAdapter: BaseClientAdapter {
         }
 
         let tStart = CFAbsoluteTimeGetCurrent()
-        let caret = client.selectedRange().location
+        let selection = client.selectedRange()
+        let caret = selection.location
         let tAfterSel = CFAbsoluteTimeGetCurrent()
         var readbackMs = 0.0
 
@@ -373,6 +374,7 @@ final class DirectInsertionAdapter: BaseClientAdapter {
 
         let plan = DirectInsertionPlanner.plan(
             cursorLocation: caret,
+            selectionLength: selection.length,
             livePreeditLength: livePreeditLength,
             textUTF16Count: text.utf16.count,
             keepingLive: keepingLive
