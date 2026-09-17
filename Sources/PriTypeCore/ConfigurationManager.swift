@@ -60,6 +60,36 @@ public struct KeyBinding: Codable, Equatable, Sendable {
         modifiers == 0
     }
     
+    /// Key codes that are safe to bind on their own. The event tap consumes the
+    /// bound key globally, so a bare printable or essential key (Space, Return,
+    /// a letter) disappears from the whole system — including from this app's own
+    /// settings window, leaving `defaults write` as the only way back. Function
+    /// keys type nothing, so binding one alone is fine.
+    private static let bareBindableKeyCodes: Set<Int64> = [
+        122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111,   // F1-F12
+        105, 107, 113, 106, 64, 79, 80, 90                        // F13-F20
+    ]
+
+    /// Repair a persisted binding that would steal a key the user needs. Older
+    /// builds saved whatever the recorder captured, so an existing install can
+    /// hold one — and its owner cannot type that key to fix it.
+    public static func sanitizedToggle(_ decoded: KeyBinding) -> KeyBinding {
+        decoded.isSafeAsBinding ? decoded : .defaultToggle
+    }
+
+    public static func sanitizedHanja(_ decoded: KeyBinding) -> KeyBinding {
+        decoded.isSafeAsBinding ? decoded : .defaultHanja
+    }
+
+    /// Whether this binding can be installed without stealing a key the user needs.
+    public var isSafeAsBinding: Bool {
+        // Caps Lock and Fn are not deliverable as PriType toggles.
+        if keyCode == 57 || keyCode == 63 { return false }
+        if isModifierKey { return true }
+        if modifiers != 0 { return true }
+        return Self.bareBindableKeyCodes.contains(keyCode)
+    }
+
     /// Whether the bound key is a modifier key (Command, Option, Control, Shift, CapsLock)
     /// Modifier keys generate `flagsChanged` events; regular keys generate `keyDown` events.
     public var isModifierKey: Bool {
@@ -88,6 +118,31 @@ public struct KeyBinding: Codable, Equatable, Sendable {
         }
     }
     
+    /// Device-dependent mask naming ONE physical modifier key
+    /// (IOLLEvent.h NX_DEVICE*KEYMASK). `modifierFlagMask` is shared by the left
+    /// and right key, so releasing the bound key while the other side is held
+    /// never cleared the "held" latch and every later key event lost its
+    /// modifier — Cmd+C typed a literal "c".
+    public var deviceModifierFlagMask: UInt64 {
+        switch keyCode {
+        case 55: return 0x00000008   // Left Command
+        case 54: return 0x00000010   // Right Command
+        case 58: return 0x00000020   // Left Option
+        case 61: return 0x00000040   // Right Option
+        case 59: return 0x00000001   // Left Control
+        case 62: return 0x00002000   // Right Control
+        case 56: return 0x00000002   // Left Shift
+        case 60: return 0x00000004   // Right Shift
+        default: return 0
+        }
+    }
+
+    /// Mask to test press/release against: the one physical key when it has a
+    /// device bit, otherwise the shared bit (Caps Lock).
+    public var pressDetectionFlagMask: UInt64 {
+        deviceModifierFlagMask != 0 ? deviceModifierFlagMask : modifierFlagMask
+    }
+
     /// Default toggle key: Right Command
     public static let defaultToggle = KeyBinding(keyCode: 54, modifiers: 0, displayName: "우측 Command")
     
@@ -435,7 +490,7 @@ public final class ConfigurationManager: ConfigurationProviding, @unchecked Send
             if let data = defaults.data(forKey: Keys.toggleKeyBinding),
                let decoded = try? JSONDecoder().decode(KeyBinding.self, from: data) {
                 // Fn and Caps Lock are not supported as PriType custom toggle keys.
-                binding = (decoded.keyCode == 63 || decoded.keyCode == 57) ? .defaultToggle : decoded
+                binding = KeyBinding.sanitizedToggle(decoded)
             } else {
                 // Migrate from legacy toggleKey
                 binding = toggleKey.asKeyBinding
@@ -469,7 +524,7 @@ public final class ConfigurationManager: ConfigurationProviding, @unchecked Send
             if let data = defaults.data(forKey: Keys.hanjaKeyBinding),
                let decoded = try? JSONDecoder().decode(KeyBinding.self, from: data) {
                 // Sanitize: Fn key (63) is not supported in CGEventTap
-                binding = decoded.keyCode == 63 ? .defaultHanja : decoded
+                binding = KeyBinding.sanitizedHanja(decoded)
             } else {
                 binding = .defaultHanja
             }
@@ -528,31 +583,59 @@ public final class ConfigurationManager: ConfigurationProviding, @unchecked Send
         return UserDefaults.standard.object(forKey: "TISRomanSwitchState") != nil
             && UserDefaults.standard.integer(forKey: "TISRomanSwitchState") != 0
     }
+
     
     // MARK: - Text Input Features
     
     /// Mirrors macOS "Add period with double-space" for PriType Korean input.
     public var doubleSpacePeriodEnabled: Bool {
-        return systemTextFeatureLock.withLock { cachedDoubleSpacePeriodEnabled }
+        return systemTextFeatureLock.withLock {
+            let value = Self.readSystemTextFeature(
+                key: SystemTextInputKeys.automaticPeriodSubstitution,
+                defaultValue: true
+            )
+            cachedDoubleSpacePeriodEnabled = value
+            return value
+        }
     }
 
     /// Mirrors macOS "Capitalize words automatically".
     ///
-    /// PriType reads and caches this setting for observability, but does not
-    /// apply it in Korean composition. English mode passes through to macOS, so
-    /// the system handles capitalization without PriType tracking text context.
+    /// Re-read on each access so toggling the system setting takes effect without
+    /// restarting the input method.
     public var autoCapitalizationEnabled: Bool {
-        return systemTextFeatureLock.withLock { cachedAutoCapitalizationEnabled }
+        return systemTextFeatureLock.withLock {
+            let value = Self.readSystemTextFeature(
+                key: SystemTextInputKeys.automaticCapitalization,
+                defaultValue: true
+            )
+            cachedAutoCapitalizationEnabled = value
+            return value
+        }
     }
 
     /// Mirrors macOS "Use smart quotes".
     public var smartQuoteSubstitutionEnabled: Bool {
-        return systemTextFeatureLock.withLock { cachedSmartQuoteSubstitutionEnabled }
+        return systemTextFeatureLock.withLock {
+            let value = Self.readSystemTextFeature(
+                key: SystemTextInputKeys.automaticQuoteSubstitution,
+                defaultValue: true
+            )
+            cachedSmartQuoteSubstitutionEnabled = value
+            return value
+        }
     }
 
     /// Mirrors macOS "Use smart dashes".
     public var smartDashSubstitutionEnabled: Bool {
-        return systemTextFeatureLock.withLock { cachedSmartDashSubstitutionEnabled }
+        return systemTextFeatureLock.withLock {
+            let value = Self.readSystemTextFeature(
+                key: SystemTextInputKeys.automaticDashSubstitution,
+                defaultValue: true
+            )
+            cachedSmartDashSubstitutionEnabled = value
+            return value
+        }
     }
 
     private static func readSystemTextFeature(key: String, defaultValue: Bool) -> Bool {

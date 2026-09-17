@@ -100,16 +100,31 @@ public enum CursorRectResolver {
     /// Validate that a rect from firstRect is a usable cursor position
     /// Electron/Chromium apps can return garbage values (e.g. x=1.6e-314, y=19896)
     public static func isValidCursorRect(_ rect: NSRect) -> Bool {
-        // Reject zero origin (uninitialized)
-        guard rect.origin.x != 0 || rect.origin.y != 0 else { return false }
-        // Reject negative or zero height (malformed)
-        guard rect.size.height > 0 else { return false }
-        // Reject absurdly small coordinates (floating point garbage like 1.6e-314)
-        guard rect.origin.x > 1 && rect.origin.y > 1 else { return false }
+        guard !rectLooksLikeGarbage(rect) else { return false }
         // Check that the point is on any connected screen
         return NSScreen.screens.contains { screen in
             screen.frame.contains(NSPoint(x: rect.origin.x, y: rect.origin.y))
         }
+    }
+
+    /// Whether a rect is malformed rather than merely somewhere unexpected.
+    ///
+    /// Screen coordinates are signed: a display arranged left of or below the
+    /// primary has negative ones, so a positivity test threw away real caret
+    /// positions and sent the candidate window to the wrong monitor. What the
+    /// filter is for is Electron/Chromium garbage — denormals like 1.6e-314,
+    /// NaN, an uninitialized zero origin, a zero height.
+    static func rectLooksLikeGarbage(_ rect: NSRect) -> Bool {
+        guard rect.origin.x.isFinite, rect.origin.y.isFinite, rect.size.height.isFinite else { return true }
+        // Uninitialized
+        if rect.origin.x == 0 && rect.origin.y == 0 { return true }
+        // Malformed
+        if rect.size.height <= 0 { return true }
+        // Too close to the origin to be a caret: catches denormals like 1.6e-314
+        // and uninitialized sub-pixel values. Compared by MAGNITUDE — the sign
+        // carries no information about validity, it only says which display.
+        if abs(rect.origin.x) <= 1 || abs(rect.origin.y) <= 1 { return true }
+        return false
     }
 
     // MARK: - Accessibility API Cursor Position

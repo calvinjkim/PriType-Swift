@@ -138,3 +138,148 @@ struct CompositionFinalizeReasonTests {
         #expect(Set(reasons.map(\.rawValue)).count == reasons.count)
     }
 }
+
+// MARK: - Web-host first-mark replacement range
+
+/// Confluence/ProseMirror empty list items often have a non-collapsed or
+/// placeholder selection. Apple's setMarkedText docs: if there is no marked
+/// text and replacementRange is NSNotFound, the **current selection is replaced**.
+/// Replacing that selection with the first ㄱ looks like splitting a list item
+/// (`- ㄱ` then `- 감사합니다.`). Native hosts must keep NSNotFound (KakaoTalk).
+@Suite("MarkedTextReplacement")
+struct MarkedTextReplacementTests {
+    private let notFound = NSRange(location: NSNotFound, length: NSNotFound)
+    private let placeholderSelection = NSRange(location: 0, length: 1)
+    private let collapsedCaret = NSRange(location: 12, length: 0)
+
+    @Test("Native hosts always use NSNotFound")
+    func nativeAlwaysNotFound() {
+        #expect(MarkedTextReplacement.range(
+            isClearing: false,
+            hasLiveMarkedText: false,
+            selectedRange: placeholderSelection,
+            prefersCollapsedStart: false
+        ) == notFound)
+    }
+
+    @Test("Clearing marked text always uses NSNotFound")
+    func clearingAlwaysNotFound() {
+        #expect(MarkedTextReplacement.range(
+            isClearing: true,
+            hasLiveMarkedText: false,
+            selectedRange: placeholderSelection,
+            prefersCollapsedStart: true
+        ) == notFound)
+    }
+
+    @Test("Subsequent preedit updates use NSNotFound so the host replaces its marked text")
+    func liveMarkedUsesNotFound() {
+        #expect(MarkedTextReplacement.range(
+            isClearing: false,
+            hasLiveMarkedText: true,
+            selectedRange: placeholderSelection,
+            prefersCollapsedStart: true
+        ) == notFound)
+    }
+
+    @Test("First mark on a web host inserts at the caret without replacing host selection")
+    func firstWebMarkInsertsCollapsed() {
+        let range = MarkedTextReplacement.range(
+            isClearing: false,
+            hasLiveMarkedText: false,
+            selectedRange: placeholderSelection,
+            prefersCollapsedStart: true
+        )
+        #expect(range == NSRange(location: 0, length: 0),
+                "Must not replace a non-collapsed list-item selection; got \(range)")
+    }
+
+    @Test("First mark on a web host with a collapsed caret still inserts at that caret")
+    func firstWebMarkCollapsedCaret() {
+        #expect(MarkedTextReplacement.range(
+            isClearing: false,
+            hasLiveMarkedText: false,
+            selectedRange: collapsedCaret,
+            prefersCollapsedStart: true
+        ) == NSRange(location: 12, length: 0))
+    }
+
+    @Test("First mark on a web host with a real selection still replaces it")
+    func firstWebMarkRealSelectionReplaces() {
+        #expect(MarkedTextReplacement.range(
+            isClearing: false,
+            hasLiveMarkedText: false,
+            selectedRange: NSRange(location: 4, length: 5),
+            prefersCollapsedStart: true
+        ) == notFound)
+    }
+
+    @Test("Composer-active / rebuilt adapter still uses NSNotFound")
+    func rebuiltAdapterWithLiveCompositionUsesNotFound() {
+        #expect(MarkedTextReplacement.range(
+            isClearing: false,
+            hasLiveMarkedText: true,
+            selectedRange: collapsedCaret,
+            prefersCollapsedStart: true
+        ) == notFound)
+    }
+
+    @Test("Invalid or Chromium-garbage selection falls back to NSNotFound")
+    func garbageSelectionFallsBack() {
+        #expect(MarkedTextReplacement.range(
+            isClearing: false,
+            hasLiveMarkedText: false,
+            selectedRange: NSRange(location: NSNotFound, length: 0),
+            prefersCollapsedStart: true
+        ) == notFound)
+        #expect(MarkedTextReplacement.range(
+            isClearing: false,
+            hasLiveMarkedText: false,
+            selectedRange: NSRange(location: 20_000_000, length: 0),
+            prefersCollapsedStart: true
+        ) == notFound)
+    }
+}
+
+// MARK: - Safari direct insertion
+
+/// The denylist's evidence ("every keystroke tripped the caret-stability guard")
+/// was gathered on Electron/Chromium. WebKit reports a usable selection, and
+/// Apple's own Korean IME composes cleanly in Confluence where PriType's
+/// per-syllable marked-text commit splits the ProseMirror block. Direct insertion
+/// never ends a composition, so there is nothing for ProseMirror to reconcile.
+/// The adapter still bails to marked text at runtime if the caret misbehaves.
+@Suite("SafariDirectInsertion")
+struct SafariDirectInsertionTests {
+    private func context(_ bundleId: String, documentAccessSafe: Bool) -> ClientContext {
+        ClientContext(
+            bundleId: bundleId,
+            hasTextInputCapability: true,
+            isLikelyDesktopArea: false,
+            documentAccessSafe: documentAccessSafe
+        )
+    }
+
+    @Test("Safari with usable document access gets direct insertion")
+    func safariGetsDirectInsertion() {
+        #expect(TextDeliveryPolicy.mode(for: context("com.apple.Safari", documentAccessSafe: true)) == .directInsertion)
+    }
+
+    @Test("Safari without usable document access stays on marked text")
+    func safariFallsBackWithoutDocumentAccess() {
+        #expect(TextDeliveryPolicy.mode(for: context("com.apple.Safari", documentAccessSafe: false)) == .markedText)
+    }
+
+    @Test("Blink hosts stay denied — the denylist evidence was gathered there")
+    func blinkStaysDenied() {
+        for id in ["com.google.Chrome", "com.anthropic.claudefordesktop", "com.microsoft.VSCode"] {
+            #expect(TextDeliveryPolicy.mode(for: context(id, documentAccessSafe: true)) == .markedText, "\(id) must stay on marked text")
+        }
+    }
+
+    @Test("Safari remains a web content host")
+    func safariStaysWebContentHost() {
+        #expect(ClientCompatibilityPolicy.isWebContentHost(bundleId: "com.apple.Safari"))
+    }
+}
+

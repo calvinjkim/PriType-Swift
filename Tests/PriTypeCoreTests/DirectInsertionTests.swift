@@ -122,10 +122,16 @@ struct DirectInsertionDenylistTests {
             "com.microsoft.VSCode",
             "com.tinyspeck.slackmacgap",
             "com.google.Chrome",
-            "org.mozilla.firefox",
-            "com.apple.Safari"
+            "org.mozilla.firefox"
         ] {
             #expect(ClientCompatibilityPolicy.directInsertionDenied(bundleId: id), "should deny \(id)")
+        }
+    }
+
+    @Test("WebKit browsers are exempt — the denial's evidence was Electron/Chromium")
+    func webKitExempt() {
+        for id in ["com.apple.Safari", "com.apple.SafariTechnologyPreview"] {
+            #expect(!ClientCompatibilityPolicy.directInsertionDenied(bundleId: id), "should allow \(id)")
         }
     }
 
@@ -318,5 +324,40 @@ struct DirectInsertionEndToEndTests {
             _ = composer.handle(TestEventFactory.keyEvent(char: char, keyCode: code)!, delegate: client)
         }
         #expect(client.document == "가 나", "Got '\(client.document)'")
+    }
+}
+
+// MARK: - Non-collapsed selection is not a caret
+
+/// The adapter used only `selectedRange().location`. When Safari reports a
+/// non-collapsed range such as `{0, 42}` that reads as "caret at 0", so the
+/// rewrite landed at the start of the field and duplicated the syllable there
+/// (typing 글자밀어넣기 mid-text left a stray 기 at position 0). During a
+/// composition the selection must be collapsed; anything else is unusable.
+@Suite("DirectInsertion selection must be collapsed")
+struct DirectInsertionSelectionTests {
+    @Test("A non-collapsed selection bails instead of writing at its location")
+    func nonCollapsedBails() {
+        let plan = DirectInsertionPlanner.plan(
+            cursorLocation: 0,
+            selectionLength: 42,
+            livePreeditLength: 1,
+            textUTF16Count: 1,
+            keepingLive: false
+        )
+        #expect(plan.bailed, "a 42-long selection is not a caret at 0")
+    }
+
+    @Test("A collapsed selection still plans the rewrite")
+    func collapsedPlansNormally() {
+        let plan = DirectInsertionPlanner.plan(
+            cursorLocation: 12,
+            selectionLength: 0,
+            livePreeditLength: 1,
+            textUTF16Count: 1,
+            keepingLive: false
+        )
+        #expect(!plan.bailed)
+        #expect(plan.replaceRange == NSRange(location: 11, length: 1))
     }
 }

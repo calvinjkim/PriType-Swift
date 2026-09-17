@@ -44,14 +44,24 @@ struct RegistrationContractTests {
         let list = modes(info)
         #expect(list.count == 2, "expected exactly 2 input modes, got \(list.count)")
 
-        let korean = list["com.pritype.inputmethod.v2"] as? [String: Any]
+        let korean = list["com.pritype.inputmethod.v2.korean"] as? [String: Any]
         let english = list["com.pritype.inputmethod.v2.english"] as? [String: Any]
         #expect(korean?["tsInputModeScriptKey"] as? String == "smKorean")
         #expect(english?["tsInputModeScriptKey"] as? String == "smRoman")
 
         let comp = info["ComponentInputModeDict"] as? [String: Any]
         let visible = comp?["tsVisibleInputModeOrderedArrayKey"] as? [String]
-        #expect(visible == ["com.pritype.inputmethod.v2", "com.pritype.inputmethod.v2.english"])
+        #expect(visible == ["com.pritype.inputmethod.v2.korean"])
+    }
+
+    @Test("Korean mode id is not the bundle id (avoids TIS ID .v2.v2 and duplicate PriType names)")
+    func koreanModeIdDistinctFromBundle() throws {
+        let info = try loadInfoPlist()
+        let bundleId = info["CFBundleIdentifier"] as? String
+        #expect(bundleId == "com.pritype.inputmethod.v2")
+        #expect(modes(info)[bundleId ?? ""] == nil,
+                "mode key == bundle id makes TIS mint com.pritype.inputmethod.v2.v2 and names every entry PriType")
+        #expect(modes(info)["com.pritype.inputmethod.v2.korean"] != nil)
     }
 
     @Test("Declares Caps Lock language-switch capability")
@@ -63,7 +73,9 @@ struct RegistrationContractTests {
     @Test("Forbidden registration keys are absent (regression guard)")
     func noForbiddenKeys() throws {
         let info = try loadInfoPlist()
-        // The 030a035 regression: a top-level TISInputSourceID equal to a child mode id.
+        // 030a035 broke composition by setting top-level TISInputSourceID equal to a
+        // *child mode* id. Do not put TISInputSourceID at the top level at all —
+        // even parent-id == bundle id makes TIS mint `.v2.v2.korean`.
         #expect(info["TISInputSourceID"] == nil, "top-level TISInputSourceID must NOT be present")
 
         for (id, value) in modes(info) {
@@ -73,14 +85,28 @@ struct RegistrationContractTests {
         }
     }
 
+    @Test("Declares Korean as the intended language so Settings lists it under 한글")
+    func intendedLanguageKorean() throws {
+        let info = try loadInfoPlist()
+        #expect(info["TISIntendedLanguage"] as? String == "ko")
+        let korean = modes(info)["com.pritype.inputmethod.v2.korean"] as? [String: Any]
+        let english = modes(info)["com.pritype.inputmethod.v2.english"] as? [String: Any]
+        #expect(korean?["TISIntendedLanguage"] as? String == "ko")
+        #expect(korean?["tsInputModeIsVisibleKey"] as? Bool == true)
+        #expect(english?["TISIntendedLanguage"] as? String == "en")
+        #expect(english?["tsInputModeIsVisibleKey"] as? Bool == false)
+    }
+
     @Test("Core identity keys are correct")
     func coreIdentity() throws {
         let info = try loadInfoPlist()
         #expect(info["CFBundleIdentifier"] as? String == "com.pritype.inputmethod.v2")
+        #expect(info["CFBundleDisplayName"] as? String == "PriType")
+        #expect(info["CFBundleShortVersionString"] as? String == "2.7.4")
         #expect(info["InputMethodConnectionName"] as? String == "PriType_InputString_v2")
         #expect(info["InputMethodServerControllerClass"] as? String == "PriTypeInputController")
         let repertoire = info["tsInputMethodCharacterRepertoireKey"] as? [String]
-        #expect(repertoire?.contains("Hang") == true, "must declare Hangul repertoire")
+        #expect(repertoire == ["Hang"], "Hang only — Latn makes Settings list PriType against every Latin keyboard")
     }
 
     @Test("Input source icons are mode-specific template images")
@@ -90,7 +116,7 @@ struct RegistrationContractTests {
         #expect(info["tsInputMethodIconFileKey"] as? String == "icon.tiff")
 
         let list = modes(info)
-        let korean = list["com.pritype.inputmethod.v2"] as? [String: Any]
+        let korean = list["com.pritype.inputmethod.v2.korean"] as? [String: Any]
         let english = list["com.pritype.inputmethod.v2.english"] as? [String: Any]
 
         #expect(korean?["TISIconIsTemplate"] as? Bool == true)

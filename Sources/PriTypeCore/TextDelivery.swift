@@ -4,7 +4,7 @@ import InputMethodKit
 // MARK: - InputDeliveryMode
 
 /// How composition output reaches the focused client.
-enum InputDeliveryMode: Equatable {
+public enum InputDeliveryMode: Equatable {
     case immediate          // Finder desktop: defer, no marked window
     case directInsertion    // EXPERIMENTAL: real-text in-place rewrite
     case markedText         // Default: canonical marked-text composition
@@ -35,7 +35,11 @@ enum TextDeliveryPolicy {
         return .markedText
     }
 
-    static func makeAdapter(for client: IMKTextInput, context: ClientContext) -> BaseClientAdapter {
+    static func makeAdapter(
+        for client: IMKTextInput,
+        context: ClientContext,
+        hasLiveMarkedText: Bool = false
+    ) -> BaseClientAdapter {
         switch mode(for: context) {
         case .immediate:
             return ImmediateModeAdapter(client: client, bundleId: context.bundleId)
@@ -43,7 +47,11 @@ enum TextDeliveryPolicy {
             DebugLogger.log("TextDeliveryPolicy: DirectInsertionAdapter (experimental) for \(context.bundleId)")
             return DirectInsertionAdapter(client: client, bundleId: context.bundleId)
         case .markedText:
-            return MarkedTextAdapter(client: client, bundleId: context.bundleId)
+            let adapter = MarkedTextAdapter(client: client, bundleId: context.bundleId)
+            if hasLiveMarkedText {
+                adapter.assumeLiveMarkedText()
+            }
+            return adapter
         }
     }
 }
@@ -116,6 +124,9 @@ class BaseClientAdapter: NSObject, HangulComposerDelegate {
     /// Host bundle id, for engine-tuned preedit styling.
     let bundleId: String
 
+    /// Configured mode unless a subclass degrades at runtime.
+    var effectiveDeliveryMode: InputDeliveryMode { deliveryMode }
+
     /// Engine-tuned attributes for the composition preedit (effective only on
     /// macOS versions that honor IME attributes — see `PreeditUnderline`).
     let preeditAttributes: [NSAttributedString.Key: Any]
@@ -166,10 +177,72 @@ class BaseClientAdapter: NSObject, HangulComposerDelegate {
     }
 }
 
+// MARK: - MarkedTextReplacement
+
+/// Pure policy for `setMarkedText` `replacementRange`.
+///
+/// Native AppKit hosts (KakaoTalk) need `NSNotFound`: the host replaces its own
+/// marked text. Web contenteditable hosts (Confluence/ProseMirror lists) often
+/// have a non-collapsed placeholder selection in an empty `<li>`; Apple's
+/// NSTextInputClient then **replaces that selection** when there is no marked
+/// text yet, which splits the list (`- ㄱ` then `- 감사합니다.`).
+enum MarkedTextReplacement {
+    static let notFound = NSRange(location: NSNotFound, length: NSNotFound)
+    static let maxLocation = 10_000_000
+
+    static func range(
+        isClearing: Bool,
+        hasLiveMarkedText: Bool,
+        selectedRange: NSRange,
+        prefersCollapsedStart: Bool
+    ) -> NSRange {
+        if isClearing || !prefersCollapsedStart || hasLiveMarkedText {
+            return notFound
+        }
+        guard selectedRange.location != NSNotFound,
+              selectedRange.location < maxLocation else {
+            return notFound
+        }
+        // Empty-list placeholders are length 0 or 1. A real selection (a word)
+        // must still be replaced via NSNotFound, or the first jamo inserts in
+        // front of the selected text in Chrome/Safari/Slack.
+        // A one-character range is ambiguous: an empty Confluence/ProseMirror list
+        // item reports exactly that for its placeholder, and so does a shift-arrow
+        // over a single letter. The placeholder case is the one confirmed on-device,
+        // so it wins; the cost is that typing over a one-character selection in a
+        // web editor inserts in front of it instead of replacing it.
+        if selectedRange.length > 1 {
+            return notFound
+        }
+        return NSRange(location: selectedRange.location, length: 0)
+    }
+}
+
 // MARK: - MarkedTextAdapter
 
 /// Standard adapter with invisible-underline marked text for composition display
 final class MarkedTextAdapter: BaseClientAdapter {
+    /// True after we have sent a non-empty marked string that has not yet been
+    /// committed or cleared. Used instead of `client.markedRange()` because
+    /// Chromium often reports NSNotFound for markedRange even during preedit.
+    /// Must survive adapter rebuild / activateServer: Electron often recreates
+    /// the IMK session mid-syllable.
+    private var hasLiveMarkedText = false
+
+    func assumeLiveMarkedText() {
+        hasLiveMarkedText = true
+    }
+
+    override func insertText(_ text: String) {
+        hasLiveMarkedText = false
+        super.insertText(text)
+    }
+
+    /// Session-ending commits talk to the IMK client directly and skip `insertText`.
+    func resetLiveMarkedText() {
+        hasLiveMarkedText = false
+    }
+
     override func setMarkedText(_ text: String) {
         // Canonical marked-text protocol, matching Apple's own input methods:
         // set the marked text directly with replacementRange = NSNotFound (an
@@ -178,11 +251,25 @@ final class MarkedTextAdapter: BaseClientAdapter {
         // non-canonical path (clearing via insertText("") over an explicit marked
         // range) left native hosts like KakaoTalk in an inconsistent composition
         // state — a stranded/underlined preedit that never committed on focus loss.
+        //
+        // Web hosts are the exception on the *first* mark only: insert at the
+        // caret (`length: 0`) so an empty-list placeholder selection is not
+        // replaced. Later updates still use NSNotFound.
+        let prefersCollapsedStart = ClientCompatibilityPolicy
+            .prefersCollapsedCompositionReplacement(bundleId: bundleId)
+        let needsCollapsedStart = prefersCollapsedStart && !text.isEmpty && !hasLiveMarkedText
+        let replacement = MarkedTextReplacement.range(
+            isClearing: text.isEmpty,
+            hasLiveMarkedText: hasLiveMarkedText,
+            selectedRange: needsCollapsedStart ? client.selectedRange() : MarkedTextReplacement.notFound,
+            prefersCollapsedStart: prefersCollapsedStart
+        )
+        hasLiveMarkedText = !text.isEmpty
         let attributed = NSAttributedString(string: text, attributes: preeditAttributes)
         client.setMarkedText(
             attributed,
             selectionRange: NSRange(location: text.utf16.count, length: 0),
-            replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
+            replacementRange: replacement
         )
     }
 }
@@ -224,6 +311,18 @@ final class DirectInsertionAdapter: BaseClientAdapter {
     /// degrade to marked text for the rest of the session rather than strand text.
     private var fellBackToMarked = false
 
+    /// True once this adapter degraded to marked text. The syllable then lives in
+    /// the host's marked range, not in the document, which changes what finalize
+    /// has to do.
+    var isRenderingMarkedFallback: Bool { fellBackToMarked }
+
+    /// `deliveryMode` stays `.directInsertion` so the session does not rebuild this
+    /// adapter on every keystroke after a fallback; this reports what is really
+    /// happening to the text.
+    override var effectiveDeliveryMode: InputDeliveryMode {
+        fellBackToMarked ? .markedText : .directInsertion
+    }
+
     /// Clear live-preedit tracking. Called by the session whenever composition
     /// ends out-of-band (focus loss, mouse-click commit, secure passthrough). Also
     /// re-arms direct insertion: a clean finalize lets a host that momentarily
@@ -254,7 +353,8 @@ final class DirectInsertionAdapter: BaseClientAdapter {
         }
 
         let tStart = CFAbsoluteTimeGetCurrent()
-        let caret = client.selectedRange().location
+        let selection = client.selectedRange()
+        let caret = selection.location
         let tAfterSel = CFAbsoluteTimeGetCurrent()
         var readbackMs = 0.0
 
@@ -294,6 +394,7 @@ final class DirectInsertionAdapter: BaseClientAdapter {
 
         let plan = DirectInsertionPlanner.plan(
             cursorLocation: caret,
+            selectionLength: selection.length,
             livePreeditLength: livePreeditLength,
             textUTF16Count: text.utf16.count,
             keepingLive: keepingLive
@@ -301,6 +402,12 @@ final class DirectInsertionAdapter: BaseClientAdapter {
         if plan.bailed {
             // Document access unreliable: degrade to marked text to avoid stranding
             // a half-jamo. (Should be rare — probe + denylist gate this.)
+            // The live preedit is REAL text we already wrote. Remove it before the
+            // marked-text path draws the same syllable, or the host keeps both.
+            if let stale = DirectInsertionPlanner.removalRangeOnBail(
+                livePreeditLength: livePreeditLength, expectedCaret: expectedCaret) {
+                client.insertText("", replacementRange: stale)
+            }
             fellBackToMarked = true
             livePreeditLength = 0
             livePreeditText = ""

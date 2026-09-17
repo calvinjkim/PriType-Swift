@@ -60,10 +60,7 @@ public final class RightCommandSuppressor: @unchecked Sendable {
     public var onTapFailed: (@Sendable () -> Void)?
 
     /// Whether recording mode is active (for Key Recorder in settings)
-    public var isRecordingKey = false
 
-    /// Callback for key recording (settings UI)
-    public var onKeyRecorded: ((_ keyCode: Int64, _ modifiers: UInt64) -> Void)?
 
     private init() {}
 
@@ -142,30 +139,6 @@ public final class RightCommandSuppressor: @unchecked Sendable {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
 
         // Key recording mode — capture the next key press for settings UI
-        if isRecordingKey {
-            if type == .flagsChanged {
-                let flags = event.flags
-                // Only fire on key DOWN (when a new modifier appears).
-                // Caps Lock is special: its flag is the toggled lock state, so
-                // record the keyCode itself even when the flag is transitioning off.
-                let isModifierDown = flags.rawValue & 0xFFFF0000 != 0 || keyCode == 57
-                if isModifierDown {
-                    let recordCallback = onKeyRecorded
-                    DispatchQueue.main.async {
-                        recordCallback?(keyCode, 0)  // modifier-only binding
-                    }
-                    return nil  // Suppress
-                }
-            } else if type == .keyDown {
-                let modifiers = event.flags.rawValue & 0xFFFF0000  // Keep only modifier flags
-                let recordCallback = onKeyRecorded
-                DispatchQueue.main.async {
-                    recordCallback?(keyCode, modifiers)
-                }
-                return nil  // Suppress
-            }
-            return Unmanaged.passUnretained(event)
-        }
 
         let kind: ToggleKeyEventClassifier.Kind
         if type == .flagsChanged {

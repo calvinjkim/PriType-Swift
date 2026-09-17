@@ -28,23 +28,23 @@ struct SecureInputPolicy: Sendable {
             return true
         }
 
-        guard signals.hasInvalidSelection || signals.hasGlobalSecureInput else {
-            return false
-        }
-
-        if signals.hasInvalidSelection && !signals.hasTextInputCapability {
+        // Password-like fields: no marked-text capability, or a missing selection
+        // *and* no text-input attributes. Invalid selection alone is not enough —
+        // Chromium reports NSNotFound in ordinary web fields too, and treating
+        // that as secure input made Korean type as ABC qwerty.
+        let looksLikeSecureField = !signals.hasTextInputCapability || !signals.hasMarkedTextSupport
+        if signals.hasInvalidSelection && looksLikeSecureField {
             return true
         }
 
-        if !signals.hasMarkedTextSupport || !signals.hasTextInputCapability {
+        // Global Secure Event Input is process-wide. A password field in another
+        // app must not disable Hangul in this client if this client looks like a
+        // normal text field.
+        if signals.hasGlobalSecureInput && (looksLikeSecureField || signals.hasInvalidSelection) {
             return true
         }
 
-        if signals.hasInvalidSelection {
-            return true
-        }
-
-        return signals.hasGlobalSecureInput
+        return false
     }
 }
 
@@ -113,6 +113,17 @@ public enum ClientCompatibilityPolicy {
         "com.nousresearch.hermes.setup"
     ]
 
+    /// WebKit browsers: on the denylist as web-content hosts, but exempt from the
+    /// direct-insertion denial. That denial's evidence ("every keystroke tripped the
+    /// caret-stability guard") was gathered on Electron/Chromium; WebKit reports a
+    /// usable selection. It matters because the marked-text path ends a composition
+    /// on every Hangul syllable, and ProseMirror (Confluence) reconciles an empty
+    /// block into two on that composition end. Direct insertion never ends one.
+    private static let webKitDirectInsertionAllowed: Set<String> = [
+        "com.apple.Safari",
+        "com.apple.SafariTechnologyPreview"
+    ]
+
     /// Apps where experimental direct insertion is known to be IMPOSSIBLE, not just
     /// risky: Electron/Chromium and browser web-content fields report `selectedRange`
     /// and `attributedSubstring` asynchronously / inaccurately, so the in-place
@@ -158,18 +169,65 @@ public enum ClientCompatibilityPolicy {
     /// Chromium has incorporated IMK marked text, dropping only the final Hangul
     /// syllable. Prefer real-text composition there when document access is usable.
     public static func prefersDirectInsertionForComposition(bundleId: String) -> Bool {
-        hermesBundleIds.contains(bundleId)
+        hermesBundleIds.contains(bundleId) || webKitDirectInsertionAllowed.contains(bundleId)
+    }
+
+    /// Whether `bundleId` is a browser / Electron / CEF / Atlassian web editor.
+    /// These hosts run contenteditable (often ProseMirror), not AppKit text views.
+    public static func isWebContentHost(bundleId: String) -> Bool {
+        if directInsertionDenylist.contains(bundleId) { return true }
+        if blinkRendererBundleIds.contains(bundleId) { return true }
+        let lower = bundleId.lowercased()
+        return lower.contains("electron")
+            || lower.contains("chrome")
+            || lower.contains("chromium")
+            || lower.contains("atlassian")
+            || lower.contains("confluence")
+            || lower.contains("jira")
     }
 
     /// Whether direct insertion must be denied for `bundleId` because the host cannot
     /// reliably support in-place real-text rewrites (Electron/Chromium/browsers).
     /// Explicit list + a keyword heuristic for unlisted Electron/Chromium wrappers.
     public static func directInsertionDenied(bundleId: String) -> Bool {
+        if webKitDirectInsertionAllowed.contains(bundleId) { return false }
         if directInsertionDenylist.contains(bundleId) { return true }
         let lower = bundleId.lowercased()
         return lower.contains("electron")
             || lower.contains("chrome")
             || lower.contains("chromium")
+    }
+
+    /// Web editors treat Hangul Compatibility Jamo (U+3131 ㄱ) as a finished letter
+    /// and may fire compositionend after the first choseong. That commits `ㄱ` into
+    /// its own Confluence/ProseMirror list item while libhangul continues composing
+    /// the same syllable in the next item (`- ㄱ` / `- 감사합니다.`). Keep the
+    /// engine's choseong jamo (U+1100) so the host leaves composition open.
+    /// Native AppKit hosts keep compatibility jamo for display.
+    ///
+    /// Marked text only. A host that composes by direct insertion has no open
+    /// composition to protect: the conjoining jamo is written as REAL text and is
+    /// left behind when the syllable is rewritten (typing 사파이어메모 inside
+    /// existing text stranded a bare `ᄉ` U+1109 in Safari).
+    /// Whether the preedit should use conjoining U+1100 jamo.
+    ///
+    /// Marked text only. Under direct insertion the preedit is REAL text, so the
+    /// jamo is left in the document when the syllable is rewritten. The delivery
+    /// mode has to come from the adapter in use, not from the bundle id: a host
+    /// configured for direct insertion still composes with marked text when the
+    /// activation probe failed or the adapter degraded mid-session, and it needs
+    /// the jamo then.
+    public static func usesRawJamoPreedit(bundleId: String, deliveryMode: InputDeliveryMode) -> Bool {
+        deliveryMode == .markedText && isWebContentHost(bundleId: bundleId)
+    }
+
+    /// Web editors' empty list items often have a non-collapsed / placeholder
+    /// selection. `setMarkedText` with `replacementRange = NSNotFound` then
+    /// **replaces that selection** (Apple NSTextInputClient). Collapsing the
+    /// first mark to `{caret, 0}` inserts without eating the list structure.
+    /// Native hosts (KakaoTalk) must keep NSNotFound.
+    public static func prefersCollapsedCompositionReplacement(bundleId: String) -> Bool {
+        isWebContentHost(bundleId: bundleId)
     }
 
     /// Hosts whose text fields are rendered by Blink (Chromium/Electron/CEF).

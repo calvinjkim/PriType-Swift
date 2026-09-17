@@ -54,7 +54,11 @@ final class InputSession: @unchecked Sendable {
         self.client = client
         self.context = context
         self.composer = composer
-        self.adapter = TextDeliveryPolicy.makeAdapter(for: client, context: context)
+        self.adapter = TextDeliveryPolicy.makeAdapter(
+            for: client,
+            context: context,
+            hasLiveMarkedText: composer.hasActiveComposition
+        )
     }
 
     deinit {
@@ -90,7 +94,11 @@ final class InputSession: @unchecked Sendable {
     func ensureAdapterMatchesPolicy() {
         let resolved = TextDeliveryPolicy.mode(for: context)
         guard adapter.deliveryMode != resolved else { return }
-        adapter = TextDeliveryPolicy.makeAdapter(for: client, context: context)
+        adapter = TextDeliveryPolicy.makeAdapter(
+            for: client,
+            context: context,
+            hasLiveMarkedText: composer.hasActiveComposition
+        )
     }
 
     // MARK: Duplicate keyDown suppression
@@ -160,14 +168,17 @@ final class InputSession: @unchecked Sendable {
             // Nothing to commit, but the session-ending event (e.g. a mouse click)
             // likely moved the caret — stale direct-insertion tracking must never
             // survive it, or the next keystroke could rewrite unrelated text.
-            (adapter as? DirectInsertionAdapter)?.resetPreeditTracking()
+            resetAdapterTracking()
             return false
         }
 
         // EXPERIMENTAL direct insertion: the in-progress syllable is ALREADY real text
         // in the document. Re-inserting it here would duplicate the character. Just end
         // the engine's composition and clear the adapter's live-preedit tracking.
-        if let direct = adapter as? DirectInsertionAdapter {
+        if let direct = adapter as? DirectInsertionAdapter,
+           CompositionFinalizePlan.skipsReinsertion(
+               deliveryMode: direct.deliveryMode,
+               renderingMarkedFallback: direct.isRenderingMarkedFallback) {
             _ = composer.flushCommitString()   // flush engine + update buffer; do NOT insert
             direct.resetPreeditTracking()
             DebugLogger.log("InputSession: finalize[\(reason.rawValue)] direct-insertion (already in document, no re-insert)")
@@ -175,7 +186,13 @@ final class InputSession: @unchecked Sendable {
         }
 
         Self.finalizeMarkedComposition(composer: composer, client: client, reason: reason)
+        resetAdapterTracking()
         return true
+    }
+
+    private func resetAdapterTracking() {
+        (adapter as? DirectInsertionAdapter)?.resetPreeditTracking()
+        (adapter as? MarkedTextAdapter)?.resetLiveMarkedText()
     }
 
     /// The marked-text finalize, callable against any client. `PriTypeInputController`
@@ -204,6 +221,6 @@ final class InputSession: @unchecked Sendable {
     /// a stale live-preedit length can never delete real text on the next keystroke.
     func discardForSecureInput() {
         composer.discardCompositionForPassThrough()
-        (adapter as? DirectInsertionAdapter)?.resetPreeditTracking()
+        resetAdapterTracking()
     }
 }

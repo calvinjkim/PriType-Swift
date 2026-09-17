@@ -28,9 +28,13 @@
 	<dict>
 		<key>tsInputModeListKey</key>
 		<dict>
-			<key>com.pritype.inputmethod.v2</key>
+			<key>com.pritype.inputmethod.v2.korean</key>
 			<dict>
 				<key>TISIconIsTemplate</key>
+				<true/>
+				<key>TISIntendedLanguage</key>
+				<string>ko</string>
+				<key>tsInputModeIsVisibleKey</key>
 				<true/>
 				<key>tsInputModeMenuIconFileKey</key>
 				<string>input-ko.tiff</string>
@@ -45,6 +49,10 @@
 			<dict>
 				<key>TISIconIsTemplate</key>
 				<true/>
+				<key>TISIntendedLanguage</key>
+				<string>en</string>
+				<key>tsInputModeIsVisibleKey</key>
+				<false/>
 				<key>tsInputModeMenuIconFileKey</key>
 				<string>input-en.tiff</string>
 				<key>tsInputModePaletteIconFileKey</key>
@@ -57,8 +65,7 @@
 		</dict>
 		<key>tsVisibleInputModeOrderedArrayKey</key>
 		<array>
-			<string>com.pritype.inputmethod.v2</string>
-			<string>com.pritype.inputmethod.v2.english</string>
+			<string>com.pritype.inputmethod.v2.korean</string>
 		</array>
 	</dict>
 	<key>InputMethodConnectionName</key>
@@ -71,10 +78,11 @@
 	<string>stable</string>
 	<key>TICapsLockLanguageSwitchCapable</key>
 	<true/>
+	<key>TISIntendedLanguage</key>
+	<string>ko</string>
 	<key>tsInputMethodCharacterRepertoireKey</key>
 	<array>
 		<string>Hang</string>
-		<string>Latn</string>
 	</array>
 	<key>TISIconIsTemplate</key>
 	<true/>

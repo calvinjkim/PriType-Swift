@@ -20,6 +20,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### 문서
 - `Docs/UnifiedInputArchitecture.md`(canonical)와 `ARCHITECTURE.md`가 "단일 입력 모드 등록·`selectInputMode:` 미사용·Caps Lock on이면 custom toggle 비활성"이라고 서술해 코드(2-모드 등록, `selectInputMode:` 동기화)와 어긋나 있던 부분을 정정하고, 불변식 7을 개정했습니다. README의 한/영 전환 설정 안내도 함께 갱신했습니다.
 - 작업 상태 파일 `CONTRACT.md`(계약·검증 체크리스트), `PROGRESS.md`(진행 상황·후속 과제)를 추가했습니다.
+### 수정
+- `--as-patchtype`은 공식 번들 ID와 `PriTypeV2.app` 경로를 유지합니다. 새 ad-hoc 번들 ID로 갈아끼우며 공식 복사본을 지우면 Gatekeeper가 거절해 설정에 입력기가 안 나옵니다.
+- TIS가 만든 `…v2.v2.korean` 자식 모드는 기동 시 `.korean`으로 다시 쓰지 않습니다. 그 ID를 레거시로 취급하면 HIToolbox에서 한글 모드가 빠지고 부모만 남아 두벌식 Hangul을 뺏습니다.
+- 웹 호스트 첫 `setMarkedText`의 `{caret, 0}` 삽입은 선택 길이가 0~1일 때만입니다. 단어처럼 길이가 2 이상이면 `NSNotFound`로 교체합니다.
+- Electron이 음절 중간에 `activateServer`를 다시 호출해도, 활성 조합이 있으면 새 어댑터가 첫 마크로 취급하지 않습니다.
+- 로컬 설치 `./install.sh --as-patchtype`은 표시 이름만 **PatchType / 패치타입**, 버전만 `2.7.4-patch.1 (local patch)`로 바꿉니다. 번들 ID는 공식 `com.pritype.inputmethod.v2`를 유지합니다.
+- 설정이 한글 언어 아래에서 입력기를 고를 수 있도록 `TISIntendedLanguage=ko`를 등록합니다. 최상위 `TISInputSourceID`는 넣지 않습니다. 번들 ID와 같아도 TIS가 `.v2.v2.korean`을 만들기 때문입니다.
+- Confluence 같은 웹 편집기 목록에서 `감사합니다.`를 치면 초성 `ㄱ`이 따로 한 항목이 되고 나머지가 다음 항목으로 들어가던 문제를 고쳤습니다. 웹 호스트는 첫 `setMarkedText`가 비어 있는 목록의 선택 영역을 통째로 갈아치우지 않도록 캐럿에만 삽입하고, 조합 중인 초성을 호환 자모(U+3131)가 아니라 초성 자모(U+1100)로 보내 조합이 첫 타건에서 끝나지 않게 합니다. 카카오톡 등 네이티브 호스트는 기존 `NSNotFound` + 호환 자모 경로를 유지합니다.
+- 설정에 PriType가 여러 개로 보이던 문제를 줄였습니다. 한글 모드 키를 번들 ID와 같게 두면 TIS가 `com.pritype.inputmethod.v2.v2`를 만들고 모든 행이 `PriType`으로 표시됩니다. 한글 모드를 `com.pritype.inputmethod.v2.korean`으로 구분해 `한글`/`영어`로 보이게 하고, 예전 모드 ID는 기동 시 마이그레이션합니다. `~/Library`와 `/Library`에 동시에 설치하면 여전히 복제가 생기므로 `install.sh`가 경고합니다. 문자 레퍼토리에서 `Latn`을 빼고 설정에 한글 모드만 노출합니다. `Hang`+`Latn`이면 입력 소스 추가 화면이 PriType를 모든 라틴/한글 자판과 짝지어 수백 줄로 보여 줍니다.
+- 한→영 전환 직후 첫 글자가 대문자로 들어가던 문제를 고쳤습니다. 영어 자동 대문자 폴백이 커서 앞 텍스트를 빈 문자열로 보면 문장 시작으로 취급했는데, Chromium/Electron은 전환 직후 그 조회가 자주 비어 있었습니다. 이제 빈 컨텍스트는 패스스루하고, `.!?` 뒤 공백처럼 문장 끝이 확인될 때만 대문자로 넣습니다.
+- 설정에서 ABC를 꺼도 다음 포커스/전환에서 다시 살아나던 문제를 고쳤습니다. 비활성 ABC 레이아웃을 `overrideKeyboardWithKeyboardNamed`로 요청하던 경로를 제거하고, 영어 모드에서만, 그리고 ABC/US가 실제로 켜져 있을 때만 오버라이드합니다.
+- 커스텀 한/영 전환키에서 `selectInputMode:`를 호출하지 않습니다. Latin-only 필드에서 TIS가 실제 ABC 소스로 넘어가던 경로입니다.
+- 다른 앱 비밀번호 필드의 전역 Secure Input 때문에 현재 앱 한글이 영문 자판으로 나가던 문제를 줄였습니다. 일반 텍스트 필드는 조합을 유지합니다.
+- CGEventTap이 반복 실패한 뒤 IOKit으로 넘길 때 기존 탭을 끄지 않아 전환키가 두 번 먹을 수 있던 문제를 고쳤습니다.
+- 한/영 전환 시 한자 후보창을 닫습니다.
+- 시스템 자동 대문자/스마트 치환 설정을 프로세스 시작 때 한 번만 캐시하던 것을, 읽을 때마다 다시 반영하도록 바꿨습니다.
+- 시작 시 손쉬운 사용 권한 폴링이 권한을 안 주면 끝나지 않던 타이머에 2분 상한을 넣었습니다.
+- 좌/우 수정자 키가 같은 `CGEventFlags` 비트를 써서, 전환키를 뗀 뒤에도 "눌림" 상태가 풀리지 않던 문제를 고쳤습니다. 왼쪽 Command를 누른 채 우측 Command를 탭했다 떼면 이후 모든 키에서 Command가 벗겨져 `⌘C`가 문자 `c`를 입력했습니다. 이제 한 물리 키를 가리키는 기기별 플래그(`NX_DEVICE*KEYMASK`)로 누름/뗌을 판정합니다. 한자키도 같은 결함이었습니다.
+- 전환키 녹화가 수정자 없는 일반 키를 받아들여 그 키가 시스템 전체에서 먹통이 되던 문제를 고쳤습니다. 스페이스를 지정하면 설정 창을 포함해 어디서도 스페이스가 입력되지 않아 `defaults write` 외에는 되돌릴 방법이 없었습니다. 이제 녹화 시점에 이유와 함께 거부하고, 이미 저장된 위험한 지정은 읽을 때 기본값으로 되돌립니다. 수정자 키 단독, 일반 키+수정자, 기능키 단독은 그대로 쓸 수 있습니다.
+- 조합키가 수정자를 정확히 비교하도록 바꿨습니다. 부분집합 비교라 `Control+Space` 지정이 `Control+Command+Space`(이모지 팔레트)까지 가로채 삼켰습니다.
+- 직접 삽입 어댑터가 marked text로 내려간 뒤 앱을 전환하면 마지막 음절이 사라지던 문제를 고쳤습니다. 어댑터 타입이 아니라 실제 전달 방식으로 판단합니다.
+- 직접 삽입이 폴백할 때 이미 문서에 써 둔 조합 중 글자를 지우지 않아 같은 음절이 두 번 남던 문제를 고쳤습니다.
+- 주 디스플레이 왼쪽/아래에 배치된 모니터에서 한자 후보창이 엉뚱한 화면에 뜨던 문제를 고쳤습니다. 화면 좌표는 음수일 수 있는데 쓰레기값 필터가 부호로 판정했습니다.
+- `install.sh`가 기존 번들에 덮어쓰기만 해서 빌드에서 빠진 파일이 남아 코드 서명 봉인이 깨지던 문제를 고쳤습니다. 봉인이 깨지면 서명 기반 손쉬운 사용 권한 유지도 무효가 됩니다. 이제 옆에 복사한 뒤 교체합니다.
+- `install.sh`가 입력기를 두 번 종료해 설치 중 설정 창이 두 번 뜨던 문제를 고쳤습니다.
+- `install.sh`에 `--debug`를 추가했습니다. 릴리즈 빌드에서는 `DebugLogger`가 컴파일되지 않아 입력 문제 추적이 불가능했습니다.
 
 ### 조사 (한글 조합 밑줄 — macOS 26에서는 marked text로 제거 불가)
 - 조합 밑줄을 모든 앱에서 없애기 위해 marked text 속성을 엔진별로 조정했으나(`PreeditUnderline`: Blink는 `underlineStyle 1 + alpha 1/255`, 그 외는 `underlineStyle 0 + NSColor.clear`), **macOS 26에서는 효과가 없음을 실측으로 확인했습니다**. NSTextInputClient 프로브로 실제 IMK 전송 경로를 측정한 결과, IME가 보내는 모든 속성 조합 — underline 0+clear, alpha 1/255, `NSMarkedClauseSegment` 1~9(kNoHilite 포함 전체 TSM hilite 카테고리), 심지어 속성 없는 문자열까지 13종 전부 — 이 앱에는 동일한 `NSUnderline=2 + 액센트 블루`로 재생성되어 도착합니다. 수신 측 프레임워크가 IME 스타일을 폐기하고 시스템 표준 스타일을 합성하므로, **macOS 26에서는 어떤 IME도 marked text 밑줄을 숨길 수 없습니다**(애플 한글 IME도 동일한 밑줄). 엔진별 속성 튜닝은 속성이 통과되는 구버전 macOS에서만 유효하며 코드에 유지합니다(오분류·부작용 없음). 밑줄 없는 입력은 marked text를 쓰지 않는 직접 삽입 모드(`com.pritype.experimentalDirectInsertion`)로 제공됩니다. 측정 과정은 `PreeditUnderline` 주석에 기록했습니다.

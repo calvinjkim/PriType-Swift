@@ -177,6 +177,12 @@ public class HangulComposer: @unchecked Sendable {
 
         DebugLogger.log("setInputMode called externally: \(mode)")
 
+        hanjaMode = false
+        hanjaKey = ""
+        if Thread.isMainThread, HanjaCandidateWindow.shared.isVisible {
+            HanjaCandidateWindow.shared.dismiss()
+        }
+
         if let delegate = lastDelegate, !context.isEmpty() {
             commitComposition(delegate: delegate)
             DebugLogger.log("Composition committed before explicit mode switch")
@@ -375,7 +381,8 @@ public class HangulComposer: @unchecked Sendable {
         //   installs via `overrideKeyboardWithKeyboardNamed(ABC/US)`.
         // - Some macOS text conveniences do not fire for this internal English
         //   mode in every host, so PriType supplies a narrow fallback for only
-        //   the transformed cases (double-space period and auto-capitalization).
+        //   the transformed cases (double-space period, and auto-capitalization
+        //   after an explicit sentence end — never for empty/unknown cursor context).
         // Keeping this path mostly pass-through avoids the classic buffer-vs-
         // cursor desync that a PriType-side English buffer invites.
         if inputMode == .english {
@@ -489,7 +496,16 @@ public class HangulComposer: @unchecked Sendable {
 
         // Update preedit text (the single live syllable).
         if !preedit.isEmpty {
-            let preeditStr = CompositionHelpers.normalizeJamoForDisplay(preedit)
+            let preeditStr: String
+            if ClientCompatibilityPolicy.usesRawJamoPreedit(
+                bundleId: lastInputBundleId,
+                deliveryMode: delegate.effectiveDeliveryMode) {
+                // Keep U+1100 choseong so web hosts do not compositionend after the
+                // first jamo (compatibility U+3131 looks like a finished letter).
+                preeditStr = CompositionHelpers.convertToString(preedit)
+            } else {
+                preeditStr = CompositionHelpers.normalizeJamoForDisplay(preedit)
+            }
             delegate.setMarkedText(preeditStr)
         } else {
              delegate.setMarkedText("")

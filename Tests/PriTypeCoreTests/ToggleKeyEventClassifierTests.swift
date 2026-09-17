@@ -27,6 +27,8 @@ struct ToggleKeyEventClassifierTests {
     private let alphaShiftFlag = CGEventFlags.maskAlphaShift.rawValue
     /// Device-specific "right Command" bit macOS sets alongside `maskCommand`.
     private let deviceRightCommandBit: UInt64 = 0x10
+    /// Device-specific "right Option" bit macOS sets alongside `maskAlternate`.
+    private let deviceRightOptionBit: UInt64 = 0x40
 
     private let defaultToggle = KeyBinding.defaultToggle   // 우측 Command
     private let defaultHanja = KeyBinding.defaultHanja     // 우측 Option
@@ -50,7 +52,7 @@ struct ToggleKeyEventClassifierTests {
     @Test("C2: Right Command release is swallowed and clears the held state")
     func rightCommandReleaseSuppressed() {
         var classifier = ToggleKeyEventClassifier()
-        _ = classifier.classify(kind: .flagsChanged, keyCode: rightCommand, flags: commandFlag, toggle: defaultToggle, hanja: defaultHanja)
+        _ = classifier.classify(kind: .flagsChanged, keyCode: rightCommand, flags: commandFlag | deviceRightCommandBit, toggle: defaultToggle, hanja: defaultHanja)
         let release = classifier.classify(kind: .flagsChanged, keyCode: rightCommand, flags: 0, toggle: defaultToggle, hanja: defaultHanja)
         #expect(release == .suppress)
         #expect(!classifier.toggleModifierIsDown)
@@ -59,15 +61,16 @@ struct ToggleKeyEventClassifierTests {
     @Test("C3: A key typed while Right Command is held has the Command bit stripped")
     func keyWhileToggleHeldStripsModifier() {
         var classifier = ToggleKeyEventClassifier()
-        _ = classifier.classify(kind: .flagsChanged, keyCode: rightCommand, flags: commandFlag, toggle: defaultToggle, hanja: defaultHanja)
+        _ = classifier.classify(kind: .flagsChanged, keyCode: rightCommand, flags: commandFlag | deviceRightCommandBit, toggle: defaultToggle, hanja: defaultHanja)
         let action = classifier.classify(kind: .keyDown, keyCode: keyC, flags: commandFlag, toggle: defaultToggle, hanja: defaultHanja)
-        #expect(action == .stripModifier(commandFlag))
+        // Both bits: leaving the device bit behind still reads as right Command.
+        #expect(action == .stripModifier(commandFlag | deviceRightCommandBit))
     }
 
     @Test("C4: A key typed after Right Command was released passes through untouched")
     func keyAfterToggleReleasedPassesThrough() {
         var classifier = ToggleKeyEventClassifier()
-        _ = classifier.classify(kind: .flagsChanged, keyCode: rightCommand, flags: commandFlag, toggle: defaultToggle, hanja: defaultHanja)
+        _ = classifier.classify(kind: .flagsChanged, keyCode: rightCommand, flags: commandFlag | deviceRightCommandBit, toggle: defaultToggle, hanja: defaultHanja)
         _ = classifier.classify(kind: .flagsChanged, keyCode: rightCommand, flags: 0, toggle: defaultToggle, hanja: defaultHanja)
         let action = classifier.classify(kind: .keyDown, keyCode: keyC, flags: 0, toggle: defaultToggle, hanja: defaultHanja)
         #expect(action == .passThrough)
@@ -76,8 +79,8 @@ struct ToggleKeyEventClassifierTests {
     @Test("Repeated flagsChanged while Right Command stays held does not re-toggle")
     func heldToggleDoesNotRepeat() {
         var classifier = ToggleKeyEventClassifier()
-        _ = classifier.classify(kind: .flagsChanged, keyCode: rightCommand, flags: commandFlag, toggle: defaultToggle, hanja: defaultHanja)
-        let again = classifier.classify(kind: .flagsChanged, keyCode: rightCommand, flags: commandFlag, toggle: defaultToggle, hanja: defaultHanja)
+        _ = classifier.classify(kind: .flagsChanged, keyCode: rightCommand, flags: commandFlag | deviceRightCommandBit, toggle: defaultToggle, hanja: defaultHanja)
+        let again = classifier.classify(kind: .flagsChanged, keyCode: rightCommand, flags: commandFlag | deviceRightCommandBit, toggle: defaultToggle, hanja: defaultHanja)
         #expect(again == .passThrough)
     }
 
@@ -89,7 +92,7 @@ struct ToggleKeyEventClassifierTests {
         let action = classifier.classify(
             kind: .flagsChanged,
             keyCode: rightCommand,
-            flags: commandFlag | alphaShiftFlag,
+            flags: commandFlag | deviceRightCommandBit | alphaShiftFlag,
             toggle: defaultToggle,
             hanja: defaultHanja
         )
@@ -118,7 +121,7 @@ struct ToggleKeyEventClassifierTests {
     @Test("C8: Right Option press fires Hanja lookup; its release is swallowed")
     func rightOptionHanja() {
         var classifier = ToggleKeyEventClassifier()
-        let press = classifier.classify(kind: .flagsChanged, keyCode: rightOption, flags: optionFlag, toggle: defaultToggle, hanja: defaultHanja)
+        let press = classifier.classify(kind: .flagsChanged, keyCode: rightOption, flags: optionFlag | deviceRightOptionBit, toggle: defaultToggle, hanja: defaultHanja)
         let release = classifier.classify(kind: .flagsChanged, keyCode: rightOption, flags: 0, toggle: defaultToggle, hanja: defaultHanja)
         #expect(press == .hanja)
         #expect(release == .suppress)
@@ -128,7 +131,7 @@ struct ToggleKeyEventClassifierTests {
     func toggleWinsTieWithHanja() {
         var classifier = ToggleKeyEventClassifier()
         let sameKeyHanja = KeyBinding(keyCode: rightCommand, modifiers: 0, displayName: "우측 Command")
-        let action = classifier.classify(kind: .flagsChanged, keyCode: rightCommand, flags: commandFlag, toggle: defaultToggle, hanja: sameKeyHanja)
+        let action = classifier.classify(kind: .flagsChanged, keyCode: rightCommand, flags: commandFlag | deviceRightCommandBit, toggle: defaultToggle, hanja: sameKeyHanja)
         #expect(action == .toggle)
         #expect(!classifier.hanjaModifierIsDown)
     }

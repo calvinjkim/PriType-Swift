@@ -1,41 +1,176 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-# Define variables
-APP_NAME="PriTypeV2"
-BUILD_DIR=".build/release"
-INSTALL_DIR="$HOME/Library/Input Methods"
-APP_BUNDLE="${APP_NAME}.app"
+usage() {
+    cat <<'EOF'
+Usage: ./install.sh [--as-patchtype]
+
+  (default)          Install as PriTypeV2 using the source-tree identity.
+  --as-patchtype     Install a local overlay named PatchType / 패치타입,
+                     version 2.7.4-patch.1. Keeps the official bundle id
+                     (com.pritype.inputmethod.v2) so Gatekeeper/TIS will list
+                     it under 한글. Copies to /Library/Input Methods/PriTypeV2.app
+                     only. Log out after install, then add 패치 한글.
+EOF
+}
+
+AS_PATCHTYPE=0
+BUILD_CONFIG=release
+for arg in "$@"; do
+    case "$arg" in
+        --as-patchtype) AS_PATCHTYPE=1 ;;
+        --debug) BUILD_CONFIG=debug ;;
+        -h|--help) usage; exit 0 ;;
+        *)
+            echo "Unknown argument: $arg" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+if [ "$AS_PATCHTYPE" -eq 1 ]; then
+    # Same path + bundle id as the original notarized PriType. A new ad-hoc
+    # bundle id is rejected by Gatekeeper and never appears in Settings.
+    APP_NAME="PriTypeV2"
+    EXEC_NAME="PriTypeV2"
+    SYSTEM_ONLY=1
+else
+    APP_NAME="PriTypeV2"
+    EXEC_NAME="PriTypeV2"
+    SYSTEM_ONLY=0
+fi
+
+BUILD_DIR=".build/$BUILD_CONFIG"
+STAGE_DIR=".build/ime-bundle"
+APP_BUNDLE="${STAGE_DIR}/${APP_NAME}.app"
 CONTENTS_DIR="${APP_BUNDLE}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
+USER_INSTALL_DIR="$HOME/Library/Input Methods"
+SYSTEM_INSTALL_DIR="/Library/Input Methods"
+USER_BUNDLE="${USER_INSTALL_DIR}/${APP_NAME}.app"
+SYSTEM_BUNDLE="${SYSTEM_INSTALL_DIR}/${APP_NAME}.app"
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-echo "Building release..."
-swift build -c release
+apply_patchtype_identity() {
+    python3 - "$1" <<'PY'
+import plistlib
+import sys
 
-echo "Creating bundle structure..."
+path = sys.argv[1]
+with open(path, "rb") as handle:
+    info = plistlib.load(handle)
+
+info["CFBundleDisplayName"] = "PatchType"
+info["CFBundleName"] = "PatchType"
+info["CFBundleShortVersionString"] = "2.7.4-patch.1"
+info["CFBundleVersion"] = "51"
+info["PriTypeReleaseChannel"] = "local"
+info["TISIntendedLanguage"] = "ko"
+
+# Never change the official bundle id. A new ad-hoc id is Gatekeeper-rejected
+# and install then wiping PriTypeV2.app leaves the user with no IME.
+bundle_id = info.get("CFBundleIdentifier")
+if bundle_id != "com.pritype.inputmethod.v2":
+    raise SystemExit(f"refusing to install overlay with bundle id {bundle_id!r}")
+
+modes = info.get("ComponentInputModeDict", {}).get("tsInputModeListKey", {})
+if "com.pritype.inputmethod.v2.korean" in modes:
+    modes["com.pritype.inputmethod.v2.korean"]["TISIntendedLanguage"] = "ko"
+    modes["com.pritype.inputmethod.v2.korean"]["tsInputModeIsVisibleKey"] = True
+if "com.pritype.inputmethod.v2.english" in modes:
+    modes["com.pritype.inputmethod.v2.english"]["TISIntendedLanguage"] = "en"
+    modes["com.pritype.inputmethod.v2.english"]["tsInputModeIsVisibleKey"] = False
+
+with open(path, "wb") as handle:
+    plistlib.dump(info, handle, sort_keys=False)
+PY
+
+    mkdir -p "$RESOURCES_DIR/en.lproj" "$RESOURCES_DIR/ko.lproj"
+    cat > "$RESOURCES_DIR/en.lproj/InfoPlist.strings" <<'EOF'
+/* Localized versions of Info.plist keys */
+"CFBundleName" = "PatchType";
+"CFBundleDisplayName" = "PatchType";
+"com.pritype.inputmethod.v2" = "PatchType";
+"com.pritype.inputmethod.v2.korean" = "Patch Korean";
+"com.pritype.inputmethod.v2.english" = "Patch English";
+EOF
+    cat > "$RESOURCES_DIR/ko.lproj/InfoPlist.strings" <<'EOF'
+/* Localized versions of Info.plist keys */
+"CFBundleName" = "패치타입";
+"CFBundleDisplayName" = "패치타입";
+"com.pritype.inputmethod.v2" = "패치타입";
+"com.pritype.inputmethod.v2.korean" = "패치 한글";
+"com.pritype.inputmethod.v2.english" = "패치 영어";
+EOF
+}
+
+# Stage beside the destination and swap, rather than ditto-ing into the live
+# bundle. ditto MERGES: a file the build no longer produces stays behind forever.
+# That happened when PriType_PriTypeCore.bundle moved to a Contents/ layout — the
+# flat copy survived, so codesign reported "a sealed resource is missing or
+# invalid" and the signature no longer validated. A broken seal voids the TCC
+# match for the signing identity, which is what makes the Accessibility grant
+# stick across rebuilds. Swapping keeps $dest exactly the new bundle, and it is
+# absent only for the rename rather than for a whole copy.
+copy_to_system() {
+    local src="$1"
+    local dest="$2"
+    # Kept in argv, never on disk: a helper file written here and then run as root
+    # can be rewritten by any process running as this user in between, which turns
+    # an install into arbitrary root execution.
+    local body='set -e
+src="$1"
+dest="$2"
+rm -rf "$dest.new" "$dest.old"
+ditto "$src" "$dest.new"
+if [ -d "$dest" ]; then
+    mv "$dest" "$dest.old"
+fi
+mv "$dest.new" "$dest"
+rm -rf "$dest.old"
+rm -rf "/Library/Input Methods/PatchType.app" \
+       "/Library/Input Methods/PriType.app" \
+       "/tmp/PriTypeV2.app.disabled"'
+
+    if sudo -n true 2>/dev/null; then
+        sudo /bin/bash -c "$body" swap "$src" "$dest"
+        return 0
+    fi
+
+    echo "Administrator access is required to install into /Library/Input Methods."
+    echo "A password dialog may appear."
+    osascript - "$body" "$src" "$dest" <<'APPLESCRIPT'
+on run argv
+    set body to item 1 of argv
+    set src to item 2 of argv
+    set dest to item 3 of argv
+    do shell script "/bin/bash -c " & quoted form of body & " swap " & quoted form of src & " " & quoted form of dest with administrator privileges
+end run
+APPLESCRIPT
+}
+
+echo "Building $BUILD_CONFIG..."
+swift build -c "$BUILD_CONFIG" --product PriType
+
+echo "Creating bundle structure at $APP_BUNDLE..."
+rm -rf "$STAGE_DIR"
 mkdir -p "$MACOS_DIR"
 mkdir -p "$RESOURCES_DIR"
 
 echo "Copying executable..."
-cp "$BUILD_DIR/PriType" "$MACOS_DIR/PriTypeV2"
+cp "$BUILD_DIR/PriType" "$MACOS_DIR/$EXEC_NAME"
 
 echo "Copying Info.plist..."
 cp Info.plist "$CONTENTS_DIR/"
 
-# Copy menu bar icon
-# Copy Resources directory (localization, etc)
 cp -R Resources/* "$RESOURCES_DIR/" 2>/dev/null || true
-
-# Copy App Icon
 cp "AppIcon.icns" "$RESOURCES_DIR/" 2>/dev/null || echo "No AppIcon.icns found"
-
-# Copy input source icons
 cp "icon.tiff" "$RESOURCES_DIR/" 2>/dev/null || echo "No icon.tiff found, skipping."
 cp "input-ko.tiff" "$RESOURCES_DIR/" 2>/dev/null || echo "No input-ko.tiff found, skipping."
 cp "input-en.tiff" "$RESOURCES_DIR/" 2>/dev/null || echo "No input-en.tiff found, skipping."
 
-# Copy Swift Package Manager resource bundle (required for Bundle.module / L10n)
 if [ -d "$BUILD_DIR/PriType_PriTypeCore.bundle" ]; then
     cp -R "$BUILD_DIR/PriType_PriTypeCore.bundle" "$RESOURCES_DIR/"
     echo "Copied PriType_PriTypeCore.bundle"
@@ -43,22 +178,21 @@ else
     echo "Warning: PriType_PriTypeCore.bundle not found"
 fi
 
-# Code Signing
-if [ -z "$SIGNING_IDENTITY" ]; then
-    # 1. 정식 Apple Development 인증서가 있는지 먼저 확인
-    APPLE_DEV_CERT=$(security find-identity -v -p codesigning | grep "Apple Development:" | head -n 1 | awk -F'"' '{print $2}')
-    
+if [ "$AS_PATCHTYPE" -eq 1 ]; then
+    echo "Applying PatchType identity (not official PriType 2.7.4)..."
+    apply_patchtype_identity "$CONTENTS_DIR/Info.plist"
+fi
+
+if [ -z "${SIGNING_IDENTITY:-}" ]; then
+    APPLE_DEV_CERT=$(security find-identity -v -p codesigning | grep "Apple Development:" | head -n 1 | awk -F'"' '{print $2}' || true)
     if [ -n "$APPLE_DEV_CERT" ]; then
         SIGNING_IDENTITY="$APPLE_DEV_CERT"
-    else
-        # 2. 없다면 개발용 자체 서명 인증서(PriTypeDev) 확인
-        if security find-certificate -c "PriTypeDev" > /dev/null 2>&1; then
-            SIGNING_IDENTITY="PriTypeDev"
-        fi
+    elif security find-certificate -c "PriTypeDev" > /dev/null 2>&1; then
+        SIGNING_IDENTITY="PriTypeDev"
     fi
 fi
 
-if [ -n "$SIGNING_IDENTITY" ]; then
+if [ -n "${SIGNING_IDENTITY:-}" ]; then
     echo "Signing with identity: $SIGNING_IDENTITY"
     codesign --force --sign "$SIGNING_IDENTITY" "$APP_BUNDLE"
     echo "Signing complete."
@@ -68,12 +202,51 @@ else
     codesign --force --deep --sign - "$APP_BUNDLE"
 fi
 
-echo "Installing to $INSTALL_DIR..."
-mkdir -p "$INSTALL_DIR"
-rm -rf "$INSTALL_DIR/PriType.app"
-rm -rf "$INSTALL_DIR/$APP_BUNDLE"
-mv "$APP_BUNDLE" "$INSTALL_DIR/"
+killall PriTypeV2 PatchType PriType 2>/dev/null || true
 
-echo "Installation complete!"
-echo "Please log out and log back in, or restart your computer."
-echo "Then enable '$APP_NAME' in System Settings > Keyboard > Input Sources."
+if [ "$SYSTEM_ONLY" -eq 1 ]; then
+    echo "Installing to $SYSTEM_BUNDLE (system copy only)..."
+    mkdir -p "$USER_INSTALL_DIR"
+    rm -rf \
+        "$USER_INSTALL_DIR/PriType.app" \
+        "$USER_INSTALL_DIR/PriTypeV2.app" \
+        "$USER_INSTALL_DIR/PatchType.app"
+    copy_to_system "$APP_BUNDLE" "$SYSTEM_BUNDLE"
+    INSTALL_PATH="$SYSTEM_BUNDLE"
+else
+    echo "Installing to $USER_BUNDLE..."
+    mkdir -p "$USER_INSTALL_DIR"
+    rm -rf "$USER_INSTALL_DIR/PriType.app"
+    rm -rf "$USER_INSTALL_DIR/PriTypeV2.app"
+    rm -rf "$USER_BUNDLE"
+    ditto "$APP_BUNDLE" "$USER_BUNDLE"
+    INSTALL_PATH="$USER_BUNDLE"
+
+    if [ -d "$SYSTEM_INSTALL_DIR/${APP_NAME}.app" ] && [ -d "$USER_BUNDLE" ]; then
+        echo ""
+        echo "WARNING: ${APP_NAME} is installed in TWO places:"
+        echo "  $USER_BUNDLE"
+        echo "  $SYSTEM_INSTALL_DIR/${APP_NAME}.app"
+        echo "macOS then lists the IME many times in Input Sources (one row per"
+        echo "copy × parent/Korean/English). Keep a single copy."
+    fi
+fi
+
+xattr -cr "$INSTALL_PATH" 2>/dev/null || true
+# System text-input agents only. The IME itself was killed above; killing it again
+# makes macOS relaunch it a second time, and each launch with no Accessibility
+# grant opens another Settings pane (main.swift requests it on startup).
+killall TextInputMenuAgent TextInputSwitcher keyboardservicesd imklaunchagent 2>/dev/null || true
+
+echo "Installation complete: $INSTALL_PATH"
+if [ "$AS_PATCHTYPE" -eq 1 ]; then
+    echo "Name: PatchType / 패치타입  (shown in Settings; bundle is still PriType)"
+    echo "Version: 2.7.4-patch.1 (local patch)  — not official PriType 2.7.4"
+    echo "Bundle ID: com.pritype.inputmethod.v2"
+    echo "Log out and back in, then add 한국어 → 패치 한글 (Patch Korean)."
+    echo "Do not add every row from '모든 입력 소스'."
+    echo "Apple 2-Set Korean can stay as a fallback."
+else
+    echo "Please log out and log back in, or restart your computer."
+    echo "Then enable '$APP_NAME' in System Settings > Keyboard > Input Sources."
+fi

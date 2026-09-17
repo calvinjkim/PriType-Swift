@@ -32,7 +32,7 @@ public class SettingsWindowController: NSObject {
         let newWindow = NSWindow(contentViewController: hostingController)
         // Visually hidden (titleVisibility = .hidden) but still used by the Window
         // menu, Mission Control, and VoiceOver — so keep it localized.
-        newWindow.title = "PriType \(L10n.settings.title)"
+        newWindow.title = "\(L10n.app.name) \(L10n.settings.title)"
         newWindow.styleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
         newWindow.titlebarAppearsTransparent = true
         newWindow.titleVisibility = .hidden
@@ -278,50 +278,64 @@ struct SettingsView: View {
                 clearKeyConflict()
             }
 
-            SettingsSection(
-                title: L10n.update.title,
-                icon: "arrow.triangle.2.circlepath"
-            ) {
-                VStack(spacing: 0) {
-                    SettingsToggleRow(
-                        title: L10n.update.autoCheck,
-                        icon: "clock.arrow.2.circlepath",
-                        isOn: $autoUpdateCheckEnabled
-                    )
+            if Brand.tracksUpstreamUpdates {
+                SettingsSection(
+                    title: L10n.update.title,
+                    icon: "arrow.triangle.2.circlepath"
+                ) {
+                    VStack(spacing: 0) {
+                        SettingsToggleRow(
+                            title: L10n.update.autoCheck,
+                            icon: "clock.arrow.2.circlepath",
+                            isOn: $autoUpdateCheckEnabled
+                        )
 
-                    Divider()
-                        .opacity(0.2)
-                        .padding(.horizontal, 12)
+                        Divider()
+                            .opacity(0.2)
+                            .padding(.horizontal, 12)
 
-                    HStack(spacing: 10) {
-                        Button(action: { checkForUpdates() }) {
-                            HStack(spacing: 6) {
-                                if updateStatus == .checking {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                } else {
-                                    Image(systemName: "arrow.clockwise")
-                                        .font(.system(size: 12, weight: .medium))
+                        HStack(spacing: 10) {
+                            Button(action: { checkForUpdates() }) {
+                                HStack(spacing: 6) {
+                                    if updateStatus == .checking {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    } else {
+                                        Image(systemName: "arrow.clockwise")
+                                            .font(.system(size: 12, weight: .medium))
+                                    }
+                                    Text(L10n.update.checkButton)
+                                        .font(.system(size: 13, weight: .medium))
                                 }
-                                Text(L10n.update.checkButton)
-                                    .font(.system(size: 13, weight: .medium))
                             }
+                            .buttonStyle(.bordered)
+                            .buttonBorderShape(.roundedRectangle(radius: 7))
+                            .controlSize(.small)
+                            .disabled(updateStatus == .checking)
+
+                            Spacer()
+
+                            updateStatusView
                         }
-                        .buttonStyle(.bordered)
-                        .buttonBorderShape(.roundedRectangle(radius: 7))
-                        .controlSize(.small)
-                        .disabled(updateStatus == .checking)
-
-                        Spacer()
-
-                        updateStatusView
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 12)
                     }
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 12)
                 }
-            }
-            .onChange(of: autoUpdateCheckEnabled) { _, newValue in
-                ConfigurationManager.shared.autoUpdateCheckEnabled = newValue
+                .onChange(of: autoUpdateCheckEnabled) { _, newValue in
+                    ConfigurationManager.shared.autoUpdateCheckEnabled = newValue
+                }
+            } else {
+                SettingsSection(
+                    title: L10n.update.title,
+                    icon: "arrow.triangle.2.circlepath"
+                ) {
+                    Text(L10n.update.localPatchDisabled)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 12)
+                }
             }
 
             SettingsSection(
@@ -453,7 +467,7 @@ struct SettingsView: View {
                 SettingsHeaderIcon()
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("PriType")
+                    Text(L10n.app.name)
                         .font(.system(size: 23, weight: .semibold))
                         .foregroundStyle(.primary)
                     Text(L10n.settings.title)
@@ -614,33 +628,15 @@ struct SettingsView: View {
     /// handles 한/영. Restored from v2.6.5 (removed in the 2.7 line). Reversible:
     /// the user can re-add ABC in System Settings (needed for the login screen).
     private func removeABCKeyboard() {
-        guard let defaults = UserDefaults(suiteName: "com.apple.HIToolbox"),
-              var sources = defaults.array(forKey: "AppleEnabledInputSources") as? [[String: Any]] else {
-            withAnimation { removeABCStatus = .error }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                withAnimation { self.removeABCStatus = .idle }
-            }
-            return
-        }
-
-        let originalCount = sources.count
-        sources.removeAll { source in
-            (source["KeyboardLayout Name"] as? String) == "ABC"
-        }
-
-        if sources.count < originalCount {
-            defaults.set(sources, forKey: "AppleEnabledInputSources")
-            _ = CFPreferencesAppSynchronize("com.apple.HIToolbox" as CFString)
-
-            // Restart TextInputMenuAgent so the menu-bar input-source list refreshes now.
+        let succeeded = InputSourceManager.shared.disableDefaultABCInputSource()
+        if succeeded {
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
             task.arguments = ["TextInputMenuAgent"]
             try? task.run()
         }
 
-        // Treat "already absent" as success too — the end state is what matters.
-        withAnimation { removeABCStatus = .success }
+        withAnimation { removeABCStatus = succeeded ? .success : .error }
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
             withAnimation { self.removeABCStatus = .idle }
         }
@@ -955,6 +951,7 @@ struct KeyRecorderRow: View {
     let onCapsLockBlocked: () -> Void
 
     @State private var isRecording = false
+    @State private var rejectedBareKey = false
     @State private var isHovering = false
     @State private var monitor: Any?
     @State private var pulseAnimation = false
@@ -988,9 +985,11 @@ struct KeyRecorderRow: View {
                             .opacity(pulseAnimation ? 0.6 : 1.0)
                             .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulseAnimation)
 
-                        Text(L10n.keyBinding.recording)
+                        Text(rejectedBareKey ? L10n.keyBinding.bareKeyRejected : L10n.keyBinding.recording)
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(rejectedBareKey ? .orange : .blue)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                     } else {
                         Text(binding.displayName)
                             .font(.system(size: 12, weight: .semibold))
@@ -1065,6 +1064,14 @@ struct KeyRecorderRow: View {
                     modifiers: UInt64(modifiers),
                     displayName: KeyBinding.generateDisplayName(keyCode: keyCode, modifiers: UInt64(modifiers))
                 )
+                // The event tap consumes the bound key system-wide. Taking a bare
+                // printable key here would remove it everywhere, this window
+                // included, so keep recording instead of locking the user out.
+                guard newBinding.isSafeAsBinding else {
+                    rejectedBareKey = true
+                    return nil  // Consume, stay in recording mode
+                }
+                rejectedBareKey = false
                 binding = newBinding
                 stopRecording()
                 return nil  // Consume event
@@ -1074,6 +1081,7 @@ struct KeyRecorderRow: View {
     }
 
     private func stopRecording() {
+        rejectedBareKey = false
         isRecording = false
         pulseAnimation = false
         if let monitor = monitor {

@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 // MARK: - ToggleKeyEventClassifier
 
@@ -86,7 +87,7 @@ public struct ToggleKeyEventClassifier: Sendable {
         // Modifier-only toggle binding (e.g. 우측 Command): fire on the press edge,
         // swallow the release, ignore repeated flag changes while held.
         if toggle.isModifierKey && toggle.isModifierOnly && keyCode == toggle.keyCode {
-            let isPressed = (flags & toggle.modifierFlagMask) != 0
+            let isPressed = (flags & toggle.pressDetectionFlagMask) != 0
             if isPressed && !toggleModifierIsDown {
                 toggleModifierIsDown = true
                 return .toggle
@@ -100,7 +101,7 @@ public struct ToggleKeyEventClassifier: Sendable {
 
         // Modifier-only hanja binding (e.g. 우측 Option). The toggle key wins a tie.
         if hanja.isModifierKey && hanja.isModifierOnly && keyCode == hanja.keyCode && keyCode != toggle.keyCode {
-            let isPressed = (flags & hanja.modifierFlagMask) != 0
+            let isPressed = (flags & hanja.pressDetectionFlagMask) != 0
             if isPressed && !hanjaModifierIsDown {
                 hanjaModifierIsDown = true
                 return .hanja
@@ -138,13 +139,26 @@ public struct ToggleKeyEventClassifier: Sendable {
 
         // A key typed while the toggle modifier is held is plain input, not a shortcut.
         if toggleModifierIsDown && toggle.isModifierKey {
-            return .stripModifier(toggle.modifierFlagMask)
+            return .stripModifier(toggle.modifierFlagMask | toggle.deviceModifierFlagMask)
         }
 
         return .passThrough
     }
 
+    /// Modifier bits a binding can name. Caps Lock, numeric-pad and function bits
+    /// ride along on real events and are not part of a binding.
+    /// maskShift | maskControl | maskAlternate | maskCommand (CGEventFlags).
+    /// Spelled as a literal so this stays pure logic with no CoreGraphics import.
+    private static let bindableModifiers: UInt64 = 0x00020000 | 0x00040000 | 0x00080000 | 0x00100000
+
+    /// Exact match, not a subset: with Control+Space bound, a subset test also
+    /// matched Control+Command+Space and swallowed the macOS Emoji picker.
+    /// Test seam for the exact-match rule.
+    static func modifiersMatchForTest(flags: CGEventFlags, required: CGEventFlags) -> Bool {
+        hasRequiredModifiers(flags: flags.rawValue, required: required.rawValue)
+    }
+
     private static func hasRequiredModifiers(flags: UInt64, required: UInt64) -> Bool {
-        (flags & required) == required
+        (flags & bindableModifiers) == (required & bindableModifiers)
     }
 }

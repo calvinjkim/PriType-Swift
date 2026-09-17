@@ -26,6 +26,12 @@ public protocol HangulComposerDelegate: AnyObject {
     /// Called when the in-progress composition text should be displayed
     /// - Parameter text: The preedit text (incomplete Hangul being composed)
     func setMarkedText(_ text: String)
+
+    /// How composition actually reaches the host right now. Distinct from the
+    /// adapter's configured `deliveryMode`, which the session compares against
+    /// policy: a direct-insertion adapter that degraded reports `.markedText`
+    /// here while still naming `.directInsertion` there.
+    var effectiveDeliveryMode: InputDeliveryMode { get }
     
     /// Returns the text immediately before the current cursor position
     /// - Parameter length: Maximum length of text to retrieve
@@ -60,4 +66,9 @@ public enum InputMode: Sendable {
         case .english: return .korean
         }
     }
+}
+
+public extension HangulComposerDelegate {
+    /// Conformers that are not client adapters (helpers, tests) deliver as marked text.
+    var effectiveDeliveryMode: InputDeliveryMode { .markedText }
 }
